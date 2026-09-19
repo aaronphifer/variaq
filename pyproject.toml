@@ -1,0 +1,63 @@
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[project]
+name = "variaq"
+version = "0.2.0"
+description = "Local-first reproducible comparison of classical, GPU-accelerated, and quantum methods"
+readme = "README.md"
+requires-python = ">=3.12"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+keywords = [
+  "benchmarking",
+  "cuda-q",
+  "optimization",
+  "qaoa",
+  "qiskit",
+  "quantum-computing",
+  "reproducibility",
+]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Intended Audience :: Science/Research",
+  "Operating System :: OS Independent",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.12",
+  "Topic :: Scientific/Engineering",
+]
+dependencies = []
+
+[project.optional-dependencies]
+quantum = [
+  "numpy>=1.26",
+  "qiskit>=2.0,<3",
+]
+cudaq = [
+  "cudaq>=0.16,<0.17",
+  "numpy>=1.26",
+]
+dev = [
+  "build>=1.2",
+  "numpy>=1.26",
+  "pytest>=8,<10",
+  "ruff>=0.11",
+]
+
+[project.scripts]
+variaq = "variaq.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/variaq"]
+
+[tool.pytest.ini_options]
+addopts = "-q"
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]

@@ -1,0 +1,34 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+.venv/
+dist/
+build/
+/variaq-*.zip
+# Ignore archives produced under the pre-release development name.
+/q-lab-*.zip
+.DS_Store
+.idea/
+.vscode/
+
+# Local experiment state and generated artifacts
+data/*.sqlite3
+data/*.sqlite3-*
+data/problems/*.json
+data/artifacts/*
+!data/artifacts/.gitkeep
+/experiments/
+/artifacts/
+/data/examples/
+
+# Local credentials and environment files
+.env
+.env.*
+!.env.example
+*.pem
+*.key

@@ -1,0 +1,53 @@
+name: Benchmark result
+description: Share a reproducible CPU, GPU, simulator, or QPU result
+title: "[Benchmark] "
+labels: ["benchmark"]
+body:
+  - type: input
+    id: version
+    attributes:
+      label: VariaQ version or commit
+    validations:
+      required: true
+  - type: textarea
+    id: system
+    attributes:
+      label: System
+      description: Python, OS, CPU, GPU if relevant, and memory.
+    validations:
+      required: true
+  - type: textarea
+    id: frameworks
+    attributes:
+      label: Framework versions
+      description: Qiskit, CUDA-Q, and other relevant versions.
+    validations:
+      required: true
+  - type: textarea
+    id: experiment
+    attributes:
+      label: Experiment
+      description: Solver, backend, precision, problem configuration, seed, and exact command.
+    validations:
+      required: true
+  - type: dropdown
+    id: timing
+    attributes:
+      label: Timing state
+      options: [Cold, Warmed, Both]
+    validations:
+      required: true
+  - type: textarea
+    id: result
+    attributes:
+      label: Result
+      description: Objective, expectation if applicable, timing, and failure information.
+    validations:
+      required: true
+  - type: checkboxes
+    id: safety
+    attributes:
+      label: Data safety
+      options:
+        - label: This report contains no credentials, tokens, or private data.
+          required: true

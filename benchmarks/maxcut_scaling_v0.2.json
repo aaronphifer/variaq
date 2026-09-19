@@ -1,0 +1,14 @@
+{
+  "name": "maxcut-v0.2-scaling",
+  "description": "Opt-in statevector scaling matrix. Start with low trial/shot counts.",
+  "solvers": ["exact", "heuristic", "qaoa", "cudaq-cpu", "cudaq-gpu"],
+  "instances": [
+    {"nodes": 4, "edge_probability": 0.4, "seed": 204},
+    {"nodes": 6, "edge_probability": 0.4, "seed": 206},
+    {"nodes": 8, "edge_probability": 0.4, "seed": 208},
+    {"nodes": 10, "edge_probability": 0.4, "seed": 210},
+    {"nodes": 12, "edge_probability": 0.4, "seed": 212},
+    {"nodes": 14, "edge_probability": 0.4, "seed": 214},
+    {"nodes": 16, "edge_probability": 0.4, "seed": 216}
+  ]
+}

@@ -1,0 +1,12 @@
+{
+  "name": "maxcut-v0.2-matched",
+  "description": "Deterministic matched classical, Qiskit, and CUDA-Q comparison matrix.",
+  "solvers": ["exact", "heuristic", "qaoa", "cudaq-cpu", "cudaq-gpu"],
+  "instances": [
+    {"nodes": 4, "edge_probability": 0.4, "seed": 104},
+    {"nodes": 6, "edge_probability": 0.4, "seed": 106},
+    {"nodes": 8, "edge_probability": 0.4, "seed": 108},
+    {"nodes": 10, "edge_probability": 0.4, "seed": 110}
+  ]
+}
+

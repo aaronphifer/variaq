@@ -1,0 +1,12 @@
+{
+  "name": "maxcut-v0.1",
+  "description": "Small deterministic MaxCut comparison matrix; execution is opt-in.",
+  "solvers": ["exact", "heuristic", "qaoa"],
+  "instances": [
+    {"nodes": 4, "edge_probability": 0.4, "seed": 104},
+    {"nodes": 6, "edge_probability": 0.4, "seed": 106},
+    {"nodes": 8, "edge_probability": 0.4, "seed": 108},
+    {"nodes": 10, "edge_probability": 0.4, "seed": 110}
+  ]
+}
+

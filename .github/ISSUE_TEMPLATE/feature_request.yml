@@ -1,0 +1,24 @@
+name: Feature request
+description: Propose a focused VariaQ capability
+title: "[Feature] "
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Research or engineering need
+      description: What problem should this solve?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed behavior
+      description: Describe the smallest useful interface and validation.
+    validations:
+      required: true
+  - type: textarea
+    id: tradeoffs
+    attributes:
+      label: Alternatives and tradeoffs
+      description: Note dependencies, compatibility, remote execution, or scientific risks.
