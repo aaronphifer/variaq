@@ -99,6 +99,7 @@ class QiskitQAOASolver(Solver):
 
     name = "qaoa"
     version = "2"
+    supported_families = frozenset({"maxcut"})
     max_variables = 16
 
     def solve(self, problem: ProblemInstance, config: SolverConfig) -> SolveResult:
