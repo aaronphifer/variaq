@@ -13,6 +13,7 @@ class Solver(ABC):
 
     name: str
     version: str
+    supported_families: frozenset[str]
 
     @abstractmethod
     def solve(self, problem: ProblemInstance, config: SolverConfig) -> SolveResult: ...
@@ -23,17 +24,24 @@ class Solver(ABC):
         if unknown:
             raise ValidationError(f"Unsupported solver parameters: {sorted(unknown)}")
 
+    def check_family(self, problem: ProblemInstance) -> None:
+        if problem.family not in self.supported_families:
+            raise ValidationError(
+                f"Solver {self.name!r} does not support problem family {problem.family!r}; "
+                f"supported families: {sorted(self.supported_families)}"
+            )
+
 
 def get_solver(name: str) -> Solver:
     normalized = name.strip().lower()
     if normalized == "exact":
-        from variaq.solvers.exact import ExactMaxCutSolver
+        from variaq.solvers.exact import ExactSolver
 
-        return ExactMaxCutSolver()
+        return ExactSolver()
     if normalized in {"heuristic", "local-search"}:
-        from variaq.solvers.heuristic import HeuristicMaxCutSolver
+        from variaq.solvers.heuristic import HeuristicSolver
 
-        return HeuristicMaxCutSolver()
+        return HeuristicSolver()
     if normalized in {"qaoa", "qiskit-qaoa"}:
         from variaq.solvers.qiskit_qaoa import QiskitQAOASolver
 
@@ -51,3 +59,10 @@ def get_solver(name: str) -> Solver:
 
 def solver_names() -> tuple[str, ...]:
     return ("exact", "heuristic", "qaoa", "cudaq-cpu", "cudaq-gpu")
+
+
+def solver_supported_families(solver_name: str) -> frozenset[str]:
+    try:
+        return get_solver(solver_name).supported_families
+    except Exception:
+        return frozenset()

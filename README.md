@@ -34,23 +34,37 @@ physical QPU.
 
 ## Current capabilities
 
-VariaQ 0.3 supports bounded weighted MaxCut with:
+VariaQ 0.4 supports domain-neutral optimization problem families:
 
-- exact enumeration with a 24-variable guard;
-- seeded multistart local search;
-- Qiskit local statevector QAOA;
-- CUDA-Q `qpp-cpu` QAOA;
-- CUDA-Q `nvidia` and `nvidia-fp64` adapters when compatible hardware exists;
-- identical matched QAOA candidates across Qiskit and CUDA-Q;
-- canonical variable ordering and solver-independent objective evaluation;
-- append-only SQLite experiment history and rerun lineage;
-- structured failures and capability-aware unavailable outcomes;
-- deterministic 4–16 node benchmark configurations;
-- **versioned machine-readable JSON output** for scripts, plugins, and CI.
+- **MaxCut** — weighted graph partitioning into two sets.
+- **Assignment** — tasks/resources with scores, costs, capacities, demands, and
+  prohibited pairs.
+- **Subset Selection** — bounded candidate selection with individual value, cost,
+  budget, cardinality bounds, and pairwise interactions.
+- **Graph Partitioning** — k-way weighted graph partitioning with optional size
+  balance constraints.
 
-MaxCut is the first reference problem because it is bounded, easily verified,
-exactly solvable at small sizes, and maps naturally to QAOA, QUBO, and Ising
-formulations. It is a validation target, not VariaQ's intended limit.
+Solvers:
+
+- exact enumeration with configurable state guards,
+- seeded multistart local-search heuristic,
+- Qiskit local statevector QAOA (MaxCut only),
+- CUDA-Q `qpp-cpu` QAOA (MaxCut only),
+- CUDA-Q `nvidia` and `nvidia-fp64` adapters when compatible hardware exists
+  (MaxCut only).
+
+Cross-cutting features:
+
+- solver-independent canonical objective evaluation,
+- objective-sense-aware metrics (maximize/minimize),
+- optional backend-neutral binary quadratic lowering,
+- append-only SQLite experiment history and rerun lineage,
+- structured failures and capability-aware unavailable outcomes,
+- deterministic reference instance generators,
+- machine-readable problem import/export,
+- a small public domain-adapter SDK,
+- adapter scaffolding via the CLI,
+- versioned machine-readable JSON output for scripts, plugins, and CI.
 
 ## Architecture
 
@@ -71,6 +85,10 @@ The major contracts are `ProblemInstance`, `Solver`, `SolverConfig`,
 correctness; the authoritative evaluator decides objective and feasibility.
 VariaQ is pre-1.0, so these deliberate extension boundaries are not yet stable
 API promises. See [ARCHITECTURE.md](ARCHITECTURE.md).
+
+Domain-specific projects connect through small external **adapters**; see
+[`docs/domain-adapters.md`](docs/domain-adapters.md) and
+[`docs/problem-families.md`](docs/problem-families.md).
 
 ## Installation
 
@@ -114,16 +132,22 @@ variaq problem generate maxcut \
 
 variaq benchmark <problem-id> \
   --solvers exact,heuristic,qaoa \
-  --seed 42
-
-variaq benchmark <problem-id> \
-  --solvers exact,heuristic,qaoa \
   --seed 42 \
   --json | jq .
 
 variaq runs list
 variaq runs show <run-id>
 variaq runs reproduce <run-id>
+```
+
+New in 0.4:
+
+```bash
+variaq problem generate assignment --task-count 6 --resource-count 4 --seed 1
+variaq problem generate subset-selection --candidate-count 8 --seed 2
+variaq problem generate graph-partition --nodes 8 --edge-probability 0.3 --partition-count 3 --seed 3
+
+variaq adapter init my-adapter --family assignment
 ```
 
 Machine-readable output uses a stable, versioned envelope documented in
@@ -133,6 +157,20 @@ flag works for `solve`, `benchmark`, `compare quantum`, `capabilities`, and the
 
 An executable example is in
 [`examples/maxcut_quickstart`](examples/maxcut_quickstart/).
+
+## Integrating your project
+
+VariaQ core stays domain-neutral. To connect an external project, write a small
+adapter that translates your objects into one of VariaQ's generic families and
+maps the result back. See:
+
+- [`docs/domain-adapters.md`](docs/domain-adapters.md) — adapter contract and
+  example.
+- [`docs/problem-families.md`](docs/problem-families.md) — family definitions and
+  solver support matrix.
+- `variaq adapter init <name> --family <family>` — scaffold a template.
+
+Do not put project-specific semantics in VariaQ core; use an adapter.
 
 ## MaxCut reference experiment
 
@@ -155,11 +193,6 @@ variaq solve <problem-id> --solver exact --seed 42 --json | jq .
 variaq compare quantum <problem-id> \
   --solvers qaoa,cudaq-cpu,cudaq-gpu \
   --p 1 --optimizer-trials 32 --shots 1024 --seed 42
-
-variaq compare quantum <problem-id> \
-  --solvers qaoa,cudaq-cpu,cudaq-gpu \
-  --p 1 --optimizer-trials 32 --shots 1024 --seed 42 \
-  --json | jq .
 ```
 
 VariaQ generates candidates once per repeat and supplies the same ordered
@@ -167,14 +200,6 @@ vectors to every quantum adapter. It holds constant the graph and weights,
 objective, initial state, Hamiltonian and rotation conventions, QAOA depth,
 parameter ordering, candidate sequence, seed where supported, shot count,
 canonical variable ordering, and final evaluator.
-
-In the verified 8-node v0.2 experiment, Qiskit and CUDA-Q CPU both found
-objective 12. The maximum expectation difference across 32 identical candidates
-was approximately `2.84e-14`; verified p=2 cases differed by no more than about
-`5.77e-15`. This validates numerical equivalence of those tested
-implementations within floating-point tolerance. It does not demonstrate
-quantum advantage. See
-[the methodology](docs/matched-quantum-benchmarks.md).
 
 ## Reproducibility and local-first privacy
 
@@ -190,48 +215,17 @@ Databases created under the pre-release Q-Lab development name remain readable.
 If `data/variaq.sqlite3` is absent but `data/qlab.sqlite3` exists, the CLI
 opens the legacy path without migration. Historical metadata remains unchanged.
 
-## Optional CUDA-Q and GPU status
-
-```bash
-variaq solve <problem-id> --solver cudaq-cpu --seed 42 \
-  --param p=1 --param optimizer_trials=32 --param shots=1024
-
-variaq solve <problem-id> --solver cudaq-gpu --seed 42 \
-  --param p=1 --param optimizer_trials=32 --param shots=1024 \
-  --param precision=fp32
-```
-
-`cudaq-gpu` uses `nvidia` for fp32 and `nvidia-fp64` for fp64.
-
-**NVIDIA GPU exercised during v0.2 verification: NO.** The host reported zero
-compatible CUDA-Q NVIDIA devices and no usable `nvidia-smi`. No GPU performance
-conclusion has been made. Unsupported GPU requests are stored as `unavailable`,
-not failed scientific results. Contributors should submit complete reproducible
-benchmark information rather than anecdotal performance claims.
-
-## Timing and scaling
-
-```bash
-variaq compare quantum <problem-id> --warmup --repeats 10
-variaq suite --config benchmarks/maxcut_scaling_v0.2.json
-```
-
-Statevector memory grows as `2^n` complex amplitudes. Qiskit and CUDA-Q retain
-a 16-variable guard; CUDA-Q also checks an estimated byte limit. Initialization,
-warm-up, search, expectation, sampling, and total wall timing remain distinct
-where measurable. One tiny cold run is not a valid speed comparison.
-
 ## Physical-QPU safety policy
 
-VariaQ 0.2 has no physical-QPU backend, provider discovery, credentials, or job
+VariaQ 0.4 has no physical-QPU backend, provider discovery, credentials, or job
 submission. A future integration must require unmistakable intent, conceptually
 both `--backend ibm:<backend>` and `--allow-qpu`. Without explicit
 authorization, physical-QPU execution must remain impossible.
 
 ## Current limitations
 
-- MaxCut is the only implemented problem family.
-- Quantum solvers are ideal local statevector simulations.
+- Quantum solvers are ideal local statevector simulations and support MaxCut
+  only.
 - CUDA-Q GPU execution has not been physically verified by the project.
 - Peak memory is recorded only when a trustworthy source exists.
 - Public extension APIs may change before 1.0.
