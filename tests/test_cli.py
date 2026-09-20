@@ -73,7 +73,7 @@ class CLITests(unittest.TestCase):
 
             import json
 
-            run_id = json.loads(list_output.getvalue())[0]["run_id"]
+            run_id = json.loads(list_output.getvalue())["data"][0]["run_id"]
             show_output = io.StringIO()
             with redirect_stdout(show_output):
                 self.assertEqual(main(["--db", str(database), "runs", "show", run_id]), 0)

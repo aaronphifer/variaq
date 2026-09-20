@@ -19,7 +19,7 @@ from variaq.solvers.exact import ExactMaxCutSolver
 
 class PublicIdentityTests(unittest.TestCase):
     def test_variaq_import_and_version(self) -> None:
-        self.assertEqual(variaq.__version__, "0.2.0")
+        self.assertEqual(variaq.__version__, "0.3.0")
 
     def test_module_help_uses_public_cli_name(self) -> None:
         result = subprocess.run(
@@ -62,13 +62,13 @@ class PublicIdentityTests(unittest.TestCase):
             historical = replace(
                 current,
                 run_id="run-historical-q-lab-v02",
-                environment={"packages": {"q-lab": "0.2.0"}},
+                environment={"packages": {"q-lab": "0.3.0"}},
             )
             store.save(historical)
             loaded = store.get(historical.run_id)
             reproduced = runner.reproduce(historical.run_id)
 
-        self.assertEqual(loaded.environment["packages"]["q-lab"], "0.2.0")
+        self.assertEqual(loaded.environment["packages"]["q-lab"], "0.3.0")
         self.assertEqual(reproduced.rerun_of, historical.run_id)
         self.assertEqual(reproduced.result.objective, historical.result.objective)
         self.assertNotEqual(reproduced.run_id, historical.run_id)

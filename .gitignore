@@ -26,6 +26,11 @@ data/artifacts/*
 /artifacts/
 /data/examples/
 
+# Legacy/root-level runtime paths used by older local invocations.
+/variaq.db
+/variaq.db-*
+/problems/
+
 # Local credentials and environment files
 .env
 .env.*

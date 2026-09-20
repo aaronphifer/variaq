@@ -44,6 +44,7 @@ class ExactMaxCutSolver(Solver):
         elapsed = perf_counter() - started
         assert best_solution is not None
         evaluation = problem.evaluate(best_solution)
+        assert evaluation.objective is not None
         return SolveResult(
             solver_name=self.name,
             solver_version=self.version,
@@ -51,11 +52,11 @@ class ExactMaxCutSolver(Solver):
             problem_type=problem.problem_type,
             variable_count=problem.variable_count,
             solution=best_solution,
-            objective=evaluation.objective,
+            objective=float(evaluation.objective),
             feasible=evaluation.feasible,
             constraint_violations=evaluation.constraint_violations,
-            wall_time_seconds=elapsed,
-            solver_time_seconds=elapsed,
+            wall_time_seconds=float(elapsed),
+            solver_time_seconds=float(elapsed),
             backend=BackendMetadata(
                 backend_type="classical_cpu",
                 name="python-enumeration",

@@ -9,12 +9,28 @@ from pathlib import Path
 from typing import Any
 
 from variaq import __version__
+from variaq.capabilities import gather_capabilities, render_capabilities_human
 from variaq.errors import ValidationError, VariaQError
 from variaq.experiments.runner import ExperimentRunner
 from variaq.experiments.storage import ExperimentStore
 from variaq.models import ExperimentRun, SolverConfig, SolveStatus
+from variaq.outputs import (
+    benchmark_json_data,
+    quantum_comparison_json_data,
+    reproduction_json_data,
+    result_warnings,
+    run_status_for_exit,
+    solve_json_data,
+)
 from variaq.problems.base import load_problem, save_problem
 from variaq.problems.maxcut import MaxCutProblem
+from variaq.serialization import (
+    StructuredError,
+    StructuredWarning,
+    error_envelope,
+    partial_envelope,
+    success_envelope,
+)
 from variaq.solvers.base import get_solver, solver_names
 
 DEFAULT_DB = Path("data/variaq.sqlite3")
@@ -80,6 +96,23 @@ def _format_number(value: float | None, precision: int = 6) -> str:
     if value is None:
         return "-"
     return f"{value:.{precision}g}"
+
+
+def _error_type(result) -> str:
+    if result.errors:
+        first = result.errors[0]
+        inferred = type(first).__name__
+        if inferred == "str":
+            # Runner stores errors as "TypeName: message" strings.
+            return first.split(":", 1)[0]
+        return inferred
+    return "SolverError"
+
+
+def _json_flag() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(add_help=False)
+    parser.add_argument("--json", action="store_true", help="Emit structured JSON on stdout")
+    return parser
 
 
 def _print_runs(runs: list[ExperimentRun]) -> None:
@@ -233,22 +266,30 @@ def _build_parser() -> argparse.ArgumentParser:
 
     problem = subcommands.add_parser("problem", help="Create and inspect problem instances")
     problem_commands = problem.add_subparsers(dest="problem_command", required=True)
-    generate = problem_commands.add_parser("generate", help="Generate a deterministic problem")
+    generate = problem_commands.add_parser(
+        "generate", help="Generate a deterministic problem", parents=[_json_flag()]
+    )
     generate.add_argument("problem_type", choices=["maxcut"])
     generate.add_argument("--nodes", type=int, required=True)
     generate.add_argument("--edge-probability", type=float, required=True)
     generate.add_argument("--seed", type=int, required=True)
     generate.add_argument("--output", type=Path)
-    show_problem = problem_commands.add_parser("show", help="Show a saved problem")
+    show_problem = problem_commands.add_parser(
+        "show", help="Show a saved problem", parents=[_json_flag()]
+    )
     show_problem.add_argument("problem")
 
-    solve = subcommands.add_parser("solve", help="Run one solver and persist the result")
+    solve = subcommands.add_parser(
+        "solve", help="Run one solver and persist the result", parents=[_json_flag()]
+    )
     solve.add_argument("problem")
     solve.add_argument("--solver", choices=solver_names(), required=True)
     solve.add_argument("--seed", type=int, default=0)
     solve.add_argument("--param", action="append", default=[], metavar="KEY=VALUE")
 
-    benchmark = subcommands.add_parser("benchmark", help="Compare solvers on one exact instance")
+    benchmark = subcommands.add_parser(
+        "benchmark", help="Compare solvers on one exact instance", parents=[_json_flag()]
+    )
     benchmark.add_argument("problem")
     benchmark.add_argument("--solvers", default="exact,heuristic,qaoa")
     benchmark.add_argument("--seed", type=int, default=0)
@@ -257,16 +298,22 @@ def _build_parser() -> argparse.ArgumentParser:
         "--solver-param", action="append", default=[], metavar="SOLVER.KEY=VALUE"
     )
 
-    suite = subcommands.add_parser("suite", help="Run an opt-in deterministic benchmark suite")
+    suite = subcommands.add_parser(
+        "suite", help="Run an opt-in deterministic benchmark suite", parents=[_json_flag()]
+    )
     suite.add_argument("--config", type=Path, default=Path("benchmarks/maxcut_v0.1.json"))
     suite.add_argument("--solvers", help="Override comma-separated solvers from config")
     suite.add_argument("--repeats", type=int, default=1)
     suite.add_argument("--solver-param", action="append", default=[], metavar="SOLVER.KEY=VALUE")
 
+    subcommands.add_parser(
+        "capabilities", help="Report solver and framework availability", parents=[_json_flag()]
+    )
+
     compare = subcommands.add_parser("compare", help="Run controlled cross-framework comparisons")
     compare_commands = compare.add_subparsers(dest="compare_command", required=True)
     compare_quantum = compare_commands.add_parser(
-        "quantum", help="Compare matched QAOA implementations"
+        "quantum", help="Compare matched QAOA implementations", parents=[_json_flag()]
     )
     compare_quantum.add_argument("problem")
     compare_quantum.add_argument("--solvers", default="qaoa,cudaq-cpu,cudaq-gpu")
@@ -280,11 +327,11 @@ def _build_parser() -> argparse.ArgumentParser:
 
     runs = subcommands.add_parser("runs", help="Inspect or reproduce durable experiment runs")
     runs_commands = runs.add_subparsers(dest="runs_command", required=True)
-    list_runs = runs_commands.add_parser("list")
+    list_runs = runs_commands.add_parser("list", parents=[_json_flag()])
     list_runs.add_argument("--limit", type=int, default=20)
-    show_run = runs_commands.add_parser("show")
+    show_run = runs_commands.add_parser("show", parents=[_json_flag()])
     show_run.add_argument("run_id")
-    reproduce = runs_commands.add_parser("reproduce")
+    reproduce = runs_commands.add_parser("reproduce", parents=[_json_flag()])
     reproduce.add_argument("run_id")
     return parser
 
@@ -294,11 +341,29 @@ def _command_problem(args: argparse.Namespace) -> int:
         generated = MaxCutProblem.generate(args.nodes, args.edge_probability, args.seed)
         output = args.output or args.problems_dir / f"{generated.problem_id}.json"
         save_problem(generated, output)
+        if args.json:
+            print(
+                success_envelope(
+                    command="problem generate",
+                    data={
+                        "problem_id": generated.problem_id,
+                        "problem_type": "maxcut",
+                        "node_count": generated.node_count,
+                        "edge_count": len(generated.edges),
+                        "seed": args.seed,
+                        "path": str(output),
+                    },
+                )
+            )
+            return 0
         print(f"Saved {generated.problem_id} to {output}")
         print(f"nodes={generated.node_count} edges={len(generated.edges)} seed={args.seed}")
         return 0
-    generated = _resolve_problem(args.problem, args.problems_dir)
-    print(json.dumps(generated.to_dict(), indent=2, sort_keys=True))
+    problem = _resolve_problem(args.problem, args.problems_dir)
+    if args.json:
+        print(success_envelope(command="problem show", data=problem.to_dict()))
+        return 0
+    print(json.dumps(problem.to_dict(), indent=2, sort_keys=True))
     return 0
 
 
@@ -310,6 +375,32 @@ def _command_solve(args: argparse.Namespace, runner: ExperimentRunner) -> int:
         solver,
         SolverConfig(seed=args.seed, parameters=_parameters(args.param)),
     )
+    if args.json:
+        if run.result.status is SolveStatus.FAILED:
+            print(
+                error_envelope(
+                    command="solve",
+                    error=StructuredError(
+                        type=_error_type(run.result),
+                        message=run.result.errors[0] if run.result.errors else "solver failed",
+                        run_id=run.run_id,
+                    ),
+                    data=solve_json_data(run),
+                    warnings=result_warnings(run.result),
+                )
+            )
+            return 1
+        if run.result.status is SolveStatus.UNAVAILABLE:
+            print(
+                success_envelope(
+                    command="solve",
+                    data=solve_json_data(run),
+                    warnings=result_warnings(run.result),
+                )
+            )
+            return 0
+        print(success_envelope(command="solve", data=solve_json_data(run)))
+        return 0
     _print_runs([run])
     if run.result.status is SolveStatus.FAILED:
         print(f"error: {run.result.errors[0]}", file=sys.stderr)
@@ -350,10 +441,44 @@ def _command_benchmark(args: argparse.Namespace, runner: ExperimentRunner) -> in
         _configs(solvers, args.seed, args.solver_param),
         repeats=args.repeats,
     )
+    if args.json:
+        data = benchmark_json_data(problem, runs)
+        failed = [run for run in runs if run.result.status is SolveStatus.FAILED]
+        unavailable = [run for run in runs if run.result.status is SolveStatus.UNAVAILABLE]
+        warnings: list[StructuredWarning] = []
+        for run in unavailable:
+            for message in run.result.warnings:
+                warnings.append(
+                    StructuredWarning(
+                        type="backend_unavailable",
+                        message=message,
+                        context={"solver": run.result.solver_name, "run_id": run.run_id},
+                    )
+                )
+        if failed:
+            first = failed[0]
+            print(
+                partial_envelope(
+                    command="benchmark",
+                    data=data,
+                    error=StructuredError(
+                        type=_error_type(first.result),
+                        message=first.result.errors[0]
+                        if first.result.errors
+                        else "at least one solver failed",
+                        run_id=first.run_id,
+                        context={"failed_solvers": [run.result.solver_name for run in failed]},
+                    ),
+                    warnings=tuple(warnings),
+                )
+            )
+        else:
+            print(success_envelope(command="benchmark", data=data, warnings=tuple(warnings)))
+        return run_status_for_exit(runs)
     _print_problem_summary(problem, runs)
     _print_runs(runs)
     _print_aggregates(runs)
-    return 1 if any(run.result.status is SolveStatus.FAILED for run in runs) else 0
+    return run_status_for_exit(runs)
 
 
 def _command_suite(args: argparse.Namespace, runner: ExperimentRunner) -> int:
@@ -381,7 +506,16 @@ def _command_suite(args: argparse.Namespace, runner: ExperimentRunner) -> int:
         _print_runs(runs)
         _print_aggregates(runs)
         all_runs.extend(runs)
-    return 1 if any(run.result.status is SolveStatus.FAILED for run in all_runs) else 0
+    return run_status_for_exit(all_runs)
+
+
+def _command_capabilities(args: argparse.Namespace) -> int:
+    data = gather_capabilities()
+    if args.json:
+        print(success_envelope(command="capabilities", data=data, warnings=tuple()))
+        return 0
+    print(render_capabilities_human(data))
+    return 0
 
 
 def _command_compare(args: argparse.Namespace, runner: ExperimentRunner) -> int:
@@ -409,11 +543,45 @@ def _command_compare(args: argparse.Namespace, runner: ExperimentRunner) -> int:
             parameters["precision"] = args.gpu_precision
         configs[solver.name] = SolverConfig(seed=args.seed, parameters=parameters)
     runs = runner.benchmark(problem, solvers, configs, repeats=args.repeats)
+    if args.json:
+        data = quantum_comparison_json_data(problem, runs)
+        failed = [run for run in runs if run.result.status is SolveStatus.FAILED]
+        unavailable = [run for run in runs if run.result.status is SolveStatus.UNAVAILABLE]
+        warnings: list[StructuredWarning] = []
+        for run in unavailable:
+            for message in run.result.warnings:
+                warnings.append(
+                    StructuredWarning(
+                        type="backend_unavailable",
+                        message=message,
+                        context={"solver": run.result.solver_name, "run_id": run.run_id},
+                    )
+                )
+        if failed:
+            first = failed[0]
+            print(
+                partial_envelope(
+                    command="compare quantum",
+                    data=data,
+                    error=StructuredError(
+                        type=_error_type(first.result),
+                        message=first.result.errors[0]
+                        if first.result.errors
+                        else "at least one solver failed",
+                        run_id=first.run_id,
+                        context={"failed_solvers": [run.result.solver_name for run in failed]},
+                    ),
+                    warnings=tuple(warnings),
+                )
+            )
+        else:
+            print(success_envelope(command="compare quantum", data=data, warnings=tuple(warnings)))
+        return run_status_for_exit(runs)
     _print_problem_summary(problem, runs)
     _print_runs(runs)
     _print_quantum_comparison(runs)
     _print_aggregates(runs)
-    return 1 if any(run.result.status is SolveStatus.FAILED for run in runs) else 0
+    return run_status_for_exit(runs)
 
 
 def _command_runs(
@@ -422,14 +590,27 @@ def _command_runs(
     if args.runs_command == "list":
         rows = store.list_runs(args.limit)
         if not rows:
+            if args.json:
+                print(success_envelope(command="runs list", data=rows))
+                return 0
             print("No experiment runs recorded.")
             return 0
-        print(json.dumps(rows, indent=2))
+        print(success_envelope(command="runs list", data=rows))
         return 0
     if args.runs_command == "show":
-        print(json.dumps(store.get(args.run_id).to_dict(), indent=2, sort_keys=True))
+        run = store.get(args.run_id)
+        if args.json:
+            print(success_envelope(command="runs show", data=run.to_dict()))
+            return 0
+        print(json.dumps(run.to_dict(), indent=2, sort_keys=True))
         return 0
     run = runner.reproduce(args.run_id)
+    if args.json:
+        original = store.get(args.run_id)
+        print(
+            success_envelope(command="runs reproduce", data=reproduction_json_data(original, run))
+        )
+        return run_status_for_exit([run])
     _print_runs([run])
     print(f"reproduced_from={args.run_id}")
     if run.result.status is SolveStatus.FAILED:
@@ -444,6 +625,8 @@ def main(argv: list[str] | None = None) -> int:
     try:
         if args.command == "problem":
             return _command_problem(args)
+        if args.command == "capabilities":
+            return _command_capabilities(args)
         store = ExperimentStore(args.db)
         runner = ExperimentRunner(store)
         if args.command == "solve":
@@ -456,7 +639,18 @@ def main(argv: list[str] | None = None) -> int:
             return _command_compare(args, runner)
         return _command_runs(args, store, runner)
     except (VariaQError, FileExistsError, ValueError, KeyError) as exc:
-        print(f"error: {exc}", file=sys.stderr)
+        if getattr(args, "json", False):
+            print(
+                error_envelope(
+                    command=getattr(args, "command", "variaq"),
+                    error=StructuredError(
+                        type=type(exc).__name__,
+                        message=str(exc),
+                    ),
+                )
+            )
+        else:
+            print(f"error: {exc}", file=sys.stderr)
         return 2
 
 

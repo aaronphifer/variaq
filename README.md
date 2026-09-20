@@ -34,7 +34,7 @@ physical QPU.
 
 ## Current capabilities
 
-VariaQ 0.2 supports bounded weighted MaxCut with:
+VariaQ 0.3 supports bounded weighted MaxCut with:
 
 - exact enumeration with a 24-variable guard;
 - seeded multistart local search;
@@ -45,7 +45,8 @@ VariaQ 0.2 supports bounded weighted MaxCut with:
 - canonical variable ordering and solver-independent objective evaluation;
 - append-only SQLite experiment history and rerun lineage;
 - structured failures and capability-aware unavailable outcomes;
-- deterministic 4–16 node benchmark configurations.
+- deterministic 4–16 node benchmark configurations;
+- **versioned machine-readable JSON output** for scripts, plugins, and CI.
 
 MaxCut is the first reference problem because it is bounded, easily verified,
 exactly solvable at small sizes, and maps naturally to QAOA, QUBO, and Ising
@@ -105,6 +106,7 @@ This deterministic local workflow needs the `quantum` extra but no credentials,
 network, or QPU time:
 
 ```bash
+variaq capabilities --json
 variaq problem generate maxcut \
   --nodes 8 \
   --edge-probability 0.4 \
@@ -114,10 +116,20 @@ variaq benchmark <problem-id> \
   --solvers exact,heuristic,qaoa \
   --seed 42
 
+variaq benchmark <problem-id> \
+  --solvers exact,heuristic,qaoa \
+  --seed 42 \
+  --json | jq .
+
 variaq runs list
 variaq runs show <run-id>
 variaq runs reproduce <run-id>
 ```
+
+Machine-readable output uses a stable, versioned envelope documented in
+[`docs/structured-output.md`](docs/structured-output.md). The same `--json`
+flag works for `solve`, `benchmark`, `compare quantum`, `capabilities`, and the
+`runs` commands.
 
 An executable example is in
 [`examples/maxcut_quickstart`](examples/maxcut_quickstart/).
@@ -133,6 +145,8 @@ variaq solve <problem-id> --solver exact --seed 42
 variaq solve <problem-id> --solver heuristic --seed 42 --param restarts=32
 variaq solve <problem-id> --solver qaoa --seed 42 \
   --param p=1 --param optimizer_trials=32 --param shots=1024
+
+variaq solve <problem-id> --solver exact --seed 42 --json | jq .
 ```
 
 ## Matched Qiskit/CUDA-Q experiment
@@ -141,6 +155,11 @@ variaq solve <problem-id> --solver qaoa --seed 42 \
 variaq compare quantum <problem-id> \
   --solvers qaoa,cudaq-cpu,cudaq-gpu \
   --p 1 --optimizer-trials 32 --shots 1024 --seed 42
+
+variaq compare quantum <problem-id> \
+  --solvers qaoa,cudaq-cpu,cudaq-gpu \
+  --p 1 --optimizer-trials 32 --shots 1024 --seed 42 \
+  --json | jq .
 ```
 
 VariaQ generates candidates once per repeat and supplies the same ordered

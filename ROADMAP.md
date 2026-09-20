@@ -17,15 +17,16 @@ These are directions, not implemented features or delivery commitments.
 - cross-framework expectation verification;
 - capability-aware unavailable outcomes.
 
-## v0.3 — explicitly authorized physical QPU
+## v0.3 — versioned structured output
 
-- IBM first;
-- unmistakable opt-in authorization;
-- job, queue, execution, and QPU-charge timing;
-- calibration/mapping metadata;
-- no remote execution in ordinary tests.
+- machine-readable, versioned CLI output schema;
+- native JSON for solve, benchmark, compare quantum, capabilities, and run
+  inspection/reproduction;
+- structured errors/warnings and capability reporting;
+- strengthened reproduction and environment-diff contracts;
+- interface hardening across Linux, Windows, and macOS.
 
-## v0.4 — generalized problems and adapters
+## v0.4 — generalized problem families and adapters
 
 - refine interfaces from concrete use;
 - add independently verifiable reference problems;
@@ -35,8 +36,9 @@ These are directions, not implemented features or delivery commitments.
 
 - scaling summaries, export, reproducible reports, and optional visualization.
 
-## v0.6 and later — heterogeneous execution
+## v0.6 and later — heterogeneous execution, physical QPU exploration, and adapters
 
+- explicitly authorized physical QPU execution;
 - heterogeneous resources, optional remote workers, HPC/Slurm exploration,
   optional server/API mode, and optional web UI.
 

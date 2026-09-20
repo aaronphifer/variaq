@@ -1,0 +1,29 @@
+name: Windows
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  core:
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install
+        run: python -m pip install -e '.[dev]'
+      - name: Test core, storage, CLI JSON, capabilities, structured output
+        run: pytest tests/test_problems.py tests/test_experiments.py tests/test_identity.py tests/test_cli.py tests/test_solvers.py tests/test_qaoa_shared.py tests/test_capabilities.py tests/test_json_contract.py
+      - name: Lint
+        run: ruff check .
+      - name: Formatting
+        run: ruff format --check .
+      - name: Build distributions
+        run: python -m build
