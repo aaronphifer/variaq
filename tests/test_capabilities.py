@@ -62,6 +62,33 @@ class CapabilityTests(unittest.TestCase):
         self.assertFalse(data["physical_qpu"]["supported"])
         self.assertFalse(data["physical_qpu"]["available"])
 
+    def test_solver_supported_families_matrix(self) -> None:
+        """supported_families is a static solver property, independent of backend availability."""
+        for name, expected in (
+            ("exact", {"maxcut", "assignment", "subset-selection", "graph-partition"}),
+            ("heuristic", {"maxcut", "assignment", "subset-selection", "graph-partition"}),
+            ("qaoa", {"maxcut"}),
+            ("cudaq-cpu", {"maxcut"}),
+            ("cudaq-gpu", {"maxcut"}),
+        ):
+            with self.subTest(name=name):
+                entry = _solver_capability(name)
+                self.assertEqual(set(entry.supported_families), expected)
+
+    def test_solver_supported_families_present_when_backend_unavailable(self) -> None:
+        """Families do not disappear just because a backend is not available."""
+        with mock.patch("variaq.solvers.qiskit_qaoa._load_quantum_dependencies") as load:
+            load.side_effect = ImportError("simulated missing qiskit")
+            entry = _solver_capability("qaoa")
+        self.assertEqual(set(entry.supported_families), {"maxcut"})
+        self.assertFalse(entry.available)
+
+    def test_physical_qpu_reason_has_no_stale_version(self) -> None:
+        data = gather_capabilities()
+        reason = data["physical_qpu"]["reason"]
+        self.assertNotIn("0.3.0", reason)
+        self.assertIn("not supported", reason.lower())
+
 
 if __name__ == "__main__":
     unittest.main()

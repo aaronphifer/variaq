@@ -162,7 +162,7 @@ def gather_capabilities() -> dict[str, Any]:
         "supported": False,
         "installed": False,
         "available": False,
-        "reason": "Physical QPU execution is not supported in VariaQ 0.3.0",
+        "reason": "Physical QPU execution is not supported in this release.",
     }
     warnings: list[StructuredWarning] = []
     if qiskit_version is None:
@@ -252,7 +252,7 @@ def render_capabilities_human(data: dict[str, Any]) -> str:
         version = framework.get("version") or "not installed"
         lines.append(f"  {framework['name']}: {version}")
     lines.append("")
-    lines.append("Physical QPU: not supported in 0.3.0")
+    lines.append("Physical QPU: not supported in this release")
     return "\n".join(lines)
 
 

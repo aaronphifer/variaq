@@ -146,6 +146,7 @@ class CudaQStatevectorBackend:
 
 class _CudaQQAOASolver(Solver):
     version = "1"
+    supported_families = frozenset({"maxcut"})
     max_variables = 16
     target_kind: str
 
