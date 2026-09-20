@@ -16,6 +16,19 @@ from variaq.problems.base import save_problem
 from variaq.problems.maxcut import MaxCutProblem
 
 
+def _qaoa_available() -> bool:
+    try:
+        import numpy  # noqa: F401
+        import qiskit  # noqa: F401
+
+        return True
+    except (ImportError, ModuleNotFoundError, RuntimeError):
+        return False
+
+
+QAOA_AVAILABLE = _qaoa_available()
+
+
 def _capture_json(argv: list[str]) -> tuple[dict, int, str, str]:
     """Run CLI, assert only JSON on stdout, and parse it."""
     stdout = io.StringIO()
@@ -103,6 +116,7 @@ class JsonEnvelopeTests(unittest.TestCase):
         self.assertTrue(all(run_id.startswith("run-") for run_id in run_ids))
         self.assertEqual(len(set(run_ids)), len(run_ids))
 
+    @unittest.skipUnless(QAOA_AVAILABLE, "qaoa requires numpy and qiskit")
     def test_compare_quantum_json_returns_coherent_object(self) -> None:
         problem_path, db = self._problem_and_db()
         parsed, code, _, _ = _capture_json(
@@ -250,6 +264,7 @@ class JsonEnvelopeTests(unittest.TestCase):
         solver_names = {solver["name"] for solver in parsed["data"]["solvers"]}
         self.assertTrue({"exact", "heuristic", "qaoa", "cudaq-cpu", "cudaq-gpu"} <= solver_names)
 
+    @unittest.skipUnless(QAOA_AVAILABLE, "qaoa requires numpy and qiskit")
     def test_no_numpy_values_leak_into_json(self) -> None:
         problem_path, db = self._problem_and_db()
         parsed, _, stdout_text, _ = _capture_json(
