@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from variaq import __version__
+from variaq.adapter_scaffold import init_adapter
 from variaq.capabilities import gather_capabilities, render_capabilities_human
 from variaq.errors import ValidationError, VariaQError
 from variaq.experiments.runner import ExperimentRunner
@@ -22,8 +23,11 @@ from variaq.outputs import (
     run_status_for_exit,
     solve_json_data,
 )
-from variaq.problems.base import load_problem, save_problem
+from variaq.problems.assignment import AssignmentProblem
+from variaq.problems.base import ProblemInstance, load_problem, save_problem
+from variaq.problems.graph_partition import GraphPartitionProblem
 from variaq.problems.maxcut import MaxCutProblem
+from variaq.problems.subset_selection import SubsetSelectionProblem
 from variaq.serialization import (
     StructuredError,
     StructuredWarning,
@@ -80,16 +84,13 @@ def _solver_parameters(values: list[str]) -> dict[str, dict[str, Any]]:
     return dict(result)
 
 
-def _resolve_problem(reference: str, problems_dir: Path) -> MaxCutProblem:
+def _resolve_problem(reference: str, problems_dir: Path) -> ProblemInstance:
     candidate = Path(reference)
     if not candidate.exists():
         candidate = problems_dir / f"{reference}.json"
     if not candidate.exists():
         raise ValidationError(f"Problem not found: {reference}")
-    problem = load_problem(candidate)
-    if not isinstance(problem, MaxCutProblem):
-        raise ValidationError("The current VariaQ CLI supports MaxCut only")
-    return problem
+    return load_problem(candidate)
 
 
 def _format_number(value: float | None, precision: int = 6) -> str:
@@ -191,7 +192,7 @@ def _print_aggregates(runs: list[ExperimentRun]) -> None:
         )
 
 
-def _print_problem_summary(problem: MaxCutProblem, runs: list[ExperimentRun]) -> None:
+def _print_problem_summary(problem: ProblemInstance, runs: list[ExperimentRun]) -> None:
     reference = next(
         (
             (run.result.best_known_objective, run.result.best_known_source)
@@ -202,9 +203,21 @@ def _print_problem_summary(problem: MaxCutProblem, runs: list[ExperimentRun]) ->
     )
     value, source = reference
     label = "optimum" if source in {"exact_optimum", "stored_exact_optimum"} else "reference"
+    detail = ""
+    if isinstance(problem, MaxCutProblem):
+        detail = f"nodes={problem.node_count} edges={len(problem.edges)}"
+    elif isinstance(problem, AssignmentProblem):
+        detail = f"tasks={len(problem.task_ids)} resources={len(problem.resource_ids)}"
+    elif isinstance(problem, SubsetSelectionProblem):
+        detail = f"candidates={len(problem.candidate_ids)}"
+    elif isinstance(problem, GraphPartitionProblem):
+        detail = (
+            f"nodes={len(problem.node_ids)} edges={len(problem.edges)} "
+            f"partitions={problem.partition_count}"
+        )
     print(
-        f"Problem: {problem.problem_id}  nodes={problem.node_count} "
-        f"edges={len(problem.edges)}  {label}={_format_number(value)}"
+        f"Problem: {problem.problem_id}  family={problem.family} {detail} "
+        f"{label}={_format_number(value)}"
     )
 
 
@@ -269,11 +282,24 @@ def _build_parser() -> argparse.ArgumentParser:
     generate = problem_commands.add_parser(
         "generate", help="Generate a deterministic problem", parents=[_json_flag()]
     )
-    generate.add_argument("problem_type", choices=["maxcut"])
-    generate.add_argument("--nodes", type=int, required=True)
-    generate.add_argument("--edge-probability", type=float, required=True)
+    generate.add_argument(
+        "problem_type",
+        choices=["maxcut", "assignment", "subset-selection", "graph-partition"],
+    )
+    generate.add_argument("--nodes", type=int)
+    generate.add_argument("--task-count", type=int)
+    generate.add_argument("--resource-count", type=int)
+    generate.add_argument("--candidate-count", type=int)
+    generate.add_argument("--edge-probability", type=float)
+    generate.add_argument("--partition-count", type=int)
     generate.add_argument("--seed", type=int, required=True)
     generate.add_argument("--output", type=Path)
+    import_problem = problem_commands.add_parser(
+        "import", help="Import a problem artifact", parents=[_json_flag()]
+    )
+    import_problem.add_argument("input")
+    import_problem.add_argument("--output", type=Path)
+
     show_problem = problem_commands.add_parser(
         "show", help="Show a saved problem", parents=[_json_flag()]
     )
@@ -306,6 +332,15 @@ def _build_parser() -> argparse.ArgumentParser:
     suite.add_argument("--repeats", type=int, default=1)
     suite.add_argument("--solver-param", action="append", default=[], metavar="SOLVER.KEY=VALUE")
 
+    adapter = subcommands.add_parser("adapter", help="Scaffold external domain adapters")
+    adapter_commands = adapter.add_subparsers(dest="adapter_command", required=True)
+    adapter_init = adapter_commands.add_parser(
+        "init", help="Scaffold a small domain adapter template", parents=[_json_flag()]
+    )
+    adapter_init.add_argument("name")
+    adapter_init.add_argument("--family", choices=["assignment", "subset-selection"], required=True)
+    adapter_init.add_argument("--output", type=Path, default=Path("my-adapter"))
+
     subcommands.add_parser(
         "capabilities", help="Report solver and framework availability", parents=[_json_flag()]
     )
@@ -336,28 +371,88 @@ def _build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _generate_problem(args: argparse.Namespace) -> ProblemInstance:
+    family = args.problem_type
+    if family == "maxcut":
+        if args.nodes is None or args.edge_probability is None:
+            raise ValidationError("maxcut requires --nodes and --edge-probability")
+        return MaxCutProblem.generate(args.nodes, args.edge_probability, args.seed)
+    if family == "assignment":
+        if args.task_count is None or args.resource_count is None:
+            raise ValidationError("assignment requires --task-count and --resource-count")
+        return AssignmentProblem.generate(args.task_count, args.resource_count, args.seed)
+    if family == "subset-selection":
+        if args.candidate_count is None:
+            raise ValidationError("subset-selection requires --candidate-count")
+        return SubsetSelectionProblem.generate(args.candidate_count, args.seed)
+    if family == "graph-partition":
+        if args.nodes is None or args.edge_probability is None or args.partition_count is None:
+            raise ValidationError(
+                "graph-partition requires --nodes, --edge-probability, and --partition-count"
+            )
+        return GraphPartitionProblem.generate(
+            args.nodes, args.edge_probability, args.partition_count, args.seed
+        )
+    raise ValidationError(f"Unsupported problem type: {family!r}")
+
+
+def _command_adapter(args: argparse.Namespace) -> int:
+    paths = init_adapter(args.name, args.family, args.output)
+    if args.json:
+        print(success_envelope(command="adapter init", data={"files": [str(p) for p in paths]}))
+        return 0
+    print(f"Scaffolded adapter in {args.output}")
+    for path in paths:
+        print(f"  {path}")
+    return 0
+
+
 def _command_problem(args: argparse.Namespace) -> int:
     if args.problem_command == "generate":
-        generated = MaxCutProblem.generate(args.nodes, args.edge_probability, args.seed)
+        generated = _generate_problem(args)
         output = args.output or args.problems_dir / f"{generated.problem_id}.json"
         save_problem(generated, output)
+        data: dict[str, Any] = {
+            "problem_id": generated.problem_id,
+            "problem_type": generated.problem_type,
+            "family": generated.family,
+            "seed": args.seed,
+            "path": str(output),
+        }
+        if isinstance(generated, MaxCutProblem):
+            data["node_count"] = generated.node_count
+            data["edge_count"] = len(generated.edges)
+        elif isinstance(generated, AssignmentProblem):
+            data["task_count"] = len(generated.task_ids)
+            data["resource_count"] = len(generated.resource_ids)
+        elif isinstance(generated, SubsetSelectionProblem):
+            data["candidate_count"] = len(generated.candidate_ids)
+        elif isinstance(generated, GraphPartitionProblem):
+            data["node_count"] = len(generated.node_ids)
+            data["edge_count"] = len(generated.edges)
+            data["partition_count"] = generated.partition_count
+        if args.json:
+            print(success_envelope(command="problem generate", data=data))
+            return 0
+        print(f"Saved {generated.problem_id} to {output}")
+        print(f"family={generated.family} seed={args.seed}")
+        return 0
+    if args.problem_command == "import":
+        target = Path(args.input)
+        if not target.exists():
+            raise ValidationError(f"Import source not found: {target}")
+        imported = load_problem(target)
+        output = args.output or args.problems_dir / f"{imported.problem_id}.json"
+        save_problem(imported, output)
         if args.json:
             print(
                 success_envelope(
-                    command="problem generate",
-                    data={
-                        "problem_id": generated.problem_id,
-                        "problem_type": "maxcut",
-                        "node_count": generated.node_count,
-                        "edge_count": len(generated.edges),
-                        "seed": args.seed,
-                        "path": str(output),
-                    },
+                    command="problem import",
+                    data={"problem_id": imported.problem_id, "path": str(output)},
                 )
             )
             return 0
-        print(f"Saved {generated.problem_id} to {output}")
-        print(f"nodes={generated.node_count} edges={len(generated.edges)} seed={args.seed}")
+        print(f"Imported {imported.problem_id} to {output}")
         return 0
     problem = _resolve_problem(args.problem, args.problems_dir)
     if args.json:
@@ -625,6 +720,8 @@ def main(argv: list[str] | None = None) -> int:
     try:
         if args.command == "problem":
             return _command_problem(args)
+        if args.command == "adapter":
+            return _command_adapter(args)
         if args.command == "capabilities":
             return _command_capabilities(args)
         store = ExperimentStore(args.db)

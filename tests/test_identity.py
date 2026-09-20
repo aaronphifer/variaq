@@ -19,7 +19,7 @@ from variaq.solvers.exact import ExactMaxCutSolver
 
 class PublicIdentityTests(unittest.TestCase):
     def test_variaq_import_and_version(self) -> None:
-        self.assertEqual(variaq.__version__, "0.3.0")
+        self.assertEqual(variaq.__version__, "0.4.0")
 
     def test_module_help_uses_public_cli_name(self) -> None:
         result = subprocess.run(

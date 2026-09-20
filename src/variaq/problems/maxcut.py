@@ -28,6 +28,7 @@ class MaxCutProblem(ProblemInstance):
     edges: tuple[Edge, ...]
     generation: dict[str, Any]
     problem_type: str = "maxcut"
+    family: str = "maxcut"
     schema_version: int = 1
     sense: OptimizationSense = OptimizationSense.MAXIMIZE
 
@@ -71,6 +72,7 @@ class MaxCutProblem(ProblemInstance):
             "schema_version": self.schema_version,
             "problem_id": self.problem_id,
             "problem_type": self.problem_type,
+            "family": self.family,
             "sense": self.sense.value,
             "node_count": self.node_count,
             "edges": [edge.to_dict() for edge in self.edges],

@@ -15,7 +15,7 @@ from typing import Any
 from variaq import __version__
 from variaq.errors import BackendUnavailableError
 from variaq.serialization import OUTPUT_SCHEMA_VERSION, StructuredWarning
-from variaq.solvers.base import get_solver, solver_names
+from variaq.solvers.base import get_solver, solver_names, solver_supported_families
 
 
 @dataclass(frozen=True, slots=True)
@@ -24,6 +24,7 @@ class CapabilityEntry:
     supported: bool
     installed: bool
     available: bool
+    supported_families: tuple[str, ...]
     reason: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
@@ -32,6 +33,7 @@ class CapabilityEntry:
             "supported": self.supported,
             "installed": self.installed,
             "available": self.available,
+            "supported_families": list(self.supported_families),
         }
         if self.reason is not None:
             result["reason"] = self.reason
@@ -93,6 +95,7 @@ def _solver_capability(name: str) -> CapabilityEntry:
         supported=supported,
         installed=installed,
         available=available,
+        supported_families=tuple(sorted(solver_supported_families(name))),
         reason=reason,
     )
 
@@ -191,10 +194,10 @@ def gather_capabilities() -> dict[str, Any]:
             "python_implementation": sys.implementation.name,
         },
         "problem_families": [
-            {
-                "name": "maxcut",
-                "supported": True,
-            }
+            {"name": "maxcut", "supported": True},
+            {"name": "assignment", "supported": True},
+            {"name": "subset-selection", "supported": True},
+            {"name": "graph-partition", "supported": True},
         ],
         "solvers": [_solver_capability(name).to_dict() for name in solver_names()],
         "frameworks": [
@@ -238,7 +241,8 @@ def render_capabilities_human(data: dict[str, Any]) -> str:
     for solver in data["solvers"]:
         tags = [key for key in ("supported", "installed", "available") if solver.get(key)]
         tag_text = ", ".join(tags) if tags else "unsupported"
-        line = f"  {solver['name']}: {tag_text}"
+        families = ", ".join(solver.get("supported_families", []))
+        line = f"  {solver['name']}: {tag_text} ({families})"
         if solver.get("reason"):
             line += f" ({solver['reason']})"
         lines.append(line)

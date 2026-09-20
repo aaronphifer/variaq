@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+import json
 from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import Any
@@ -13,6 +15,7 @@ class ProblemInstance(ABC):
 
     problem_id: str
     problem_type: str
+    family: str
     schema_version: int
     sense: OptimizationSense
 
@@ -32,12 +35,31 @@ class ProblemInstance(ABC):
         ...
 
 
+def _identity_hash(prefix: str, payload: dict[str, Any]) -> str:
+    """Stable short hash used for deterministic problem IDs."""
+    canonical = json.dumps(payload, separators=(",", ":"), sort_keys=True).encode()
+    digest = hashlib.sha256(canonical).hexdigest()[:16]
+    return f"{prefix}-{digest}"
+
+
 def problem_from_dict(value: dict[str, Any]) -> ProblemInstance:
     problem_type = value.get("problem_type")
     if problem_type == "maxcut":
         from variaq.problems.maxcut import MaxCutProblem
 
         return MaxCutProblem.from_dict(value)
+    if problem_type == "assignment":
+        from variaq.problems.assignment import AssignmentProblem
+
+        return AssignmentProblem.from_dict(value)
+    if problem_type == "subset-selection":
+        from variaq.problems.subset_selection import SubsetSelectionProblem
+
+        return SubsetSelectionProblem.from_dict(value)
+    if problem_type == "graph-partition":
+        from variaq.problems.graph_partition import GraphPartitionProblem
+
+        return GraphPartitionProblem.from_dict(value)
     raise ValidationError(f"Unsupported problem type: {problem_type!r}")
 
 

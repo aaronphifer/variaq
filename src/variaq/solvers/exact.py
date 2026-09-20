@@ -9,42 +9,27 @@ from variaq.problems.maxcut import MaxCutProblem
 from variaq.solvers.base import Solver
 
 
-class ExactMaxCutSolver(Solver):
+class ExactSolver(Solver):
     name = "exact"
-    version = "1"
-    default_max_variables = 24
+    version = "2"
+    default_max_states = 1 << 24
+    supported_families = frozenset({"maxcut", "assignment", "subset-selection", "graph-partition"})
 
     def solve(self, problem: ProblemInstance, config: SolverConfig) -> SolveResult:
-        if not isinstance(problem, MaxCutProblem):
-            raise ValidationError("The exact v0.1 solver supports MaxCut only")
-        self.validate_parameters(config.parameters, {"max_variables"})
-        max_variables = int(config.parameters.get("max_variables", self.default_max_variables))
-        if max_variables < 1:
-            raise ValidationError("max_variables must be positive")
-        if problem.variable_count > max_variables:
-            raise SolverLimitError(
-                f"Exact solve refused {problem.variable_count} variables; "
-                f"configured guard is {max_variables}"
-            )
+        self.check_family(problem)
+        self.validate_parameters(config.parameters, {"max_states", "max_variables"})
+        max_states = int(config.parameters.get("max_states", self.default_max_states))
+        if "max_variables" in config.parameters:
+            max_states = min(max_states, 1 << int(config.parameters["max_variables"]))
+        if max_states < 1:
+            raise ValidationError("max_states must be positive")
 
         started = perf_counter()
-        best_solution: tuple[int, ...] | None = None
-        best_objective = float("-inf")
-        # Complementary cuts are equivalent, so fix node 0 to partition 0.
-        states_evaluated = 1 << max(problem.variable_count - 1, 0)
-        for state in range(states_evaluated):
-            solution = (0,) + tuple(
-                (state >> offset) & 1 for offset in range(problem.variable_count - 1)
-            )
-            evaluation = problem.evaluate(solution)
-            assert evaluation.objective is not None
-            if evaluation.objective > best_objective:
-                best_objective = evaluation.objective
-                best_solution = solution
+        best_solution, best_objective = self._enumerate(problem, max_states)
         elapsed = perf_counter() - started
-        assert best_solution is not None
         evaluation = problem.evaluate(best_solution)
         assert evaluation.objective is not None
+        states_evaluated = 1 << min(problem.variable_count, max_states.bit_length() - 1)
         return SolveResult(
             solver_name=self.name,
             solver_version=self.version,
@@ -62,10 +47,66 @@ class ExactMaxCutSolver(Solver):
                 name="python-enumeration",
                 provider="variaq",
                 is_local=True,
-                metrics={"states_evaluated": states_evaluated, "symmetry_reduction": True},
+                metrics={
+                    "states_evaluated": states_evaluated,
+                    "max_states": max_states,
+                    "symmetry_reduction": problem.family == "maxcut",
+                },
             ),
             seed=config.seed,
-            parameters={"max_variables": max_variables},
+            parameters={"max_states": max_states},
             timestamp=utc_now(),
             status=SolveStatus.SUCCESS,
         )
+
+    def _enumerate(
+        self, problem: ProblemInstance, max_states: int
+    ) -> tuple[tuple[int, ...], float]:
+        n = problem.variable_count
+        if n > 63:
+            raise SolverLimitError(
+                f"Exact enumeration refused {n} variables; exceeds 2^63 safety bound"
+            )
+        total = 1 << n
+        if total > max_states:
+            raise SolverLimitError(
+                f"Exact enumeration refused {total} states; configured guard is {max_states}"
+            )
+
+        best_solution: tuple[int, ...] | None = None
+        best_score: float | None = None
+
+        if isinstance(problem, MaxCutProblem):
+            # Complementary cuts are equivalent; fix node 0 to partition 0.
+            states = 1 << max(n - 1, 0)
+            for state in range(states):
+                solution = (0,) + tuple((state >> offset) & 1 for offset in range(n - 1))
+                evaluation = problem.evaluate(solution)
+                if evaluation.feasible and evaluation.objective is not None:
+                    if best_score is None or evaluation.objective > best_score:
+                        best_score = evaluation.objective
+                        best_solution = solution
+        else:
+            for state in range(total):
+                solution = tuple((state >> offset) & 1 for offset in range(n))
+                evaluation = problem.evaluate(solution)
+                if evaluation.feasible and evaluation.objective is not None:
+                    if best_score is None or self._better(
+                        problem.sense, evaluation.objective, best_score
+                    ):
+                        best_score = evaluation.objective
+                        best_solution = solution
+
+        if best_solution is None or best_score is None:
+            raise SolverLimitError("No feasible solution found during exact enumeration")
+        return best_solution, best_score
+
+    @staticmethod
+    def _better(sense, candidate: float, best: float) -> bool:
+        if sense.value == "maximize":
+            return candidate > best
+        return candidate < best
+
+
+# Backwards-compatible alias for pre-0.4 imports and tests.
+ExactMaxCutSolver = ExactSolver
