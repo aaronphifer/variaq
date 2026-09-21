@@ -1,0 +1,26 @@
+{
+  "campaign_format_version": "1",
+  "name": "assignment-feasibility",
+  "family": "assignment",
+  "problem_sizes": [3, 4],
+  "problem_seeds": [1, 2],
+  "solvers": ["exact", "heuristic", "qaoa"],
+  "repeats": 2,
+  "base_seed": 42,
+  "solver_config": {
+    "qaoa": {
+      "seed": 42,
+      "parameters": {
+        "p": 1,
+        "optimizer_trials": 16,
+        "shots": 512
+      }
+    }
+  },
+  "generator_parameters": {
+    "resource_count": 3,
+    "prohibited_probability": 0.2
+  },
+  "tags": ["example", "feasibility"],
+  "notes": "Small assignment campaign to exercise constrained QAOA feasibility analysis."
+}

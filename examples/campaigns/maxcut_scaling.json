@@ -1,0 +1,14 @@
+{
+  "campaign_format_version": "1",
+  "name": "maxcut_scaling_e2e",
+  "family": "maxcut",
+  "problem_sizes": [4, 6, 8],
+  "problem_seeds": [1, 2],
+  "solvers": ["exact", "heuristic"],
+  "repeats": 2,
+  "base_seed": 0,
+  "solver_config": {},
+  "generator_parameters": {"edge_probability": 0.5},
+  "tags": ["e2e"],
+  "notes": "Small deterministic MaxCut campaign for release verification."
+}

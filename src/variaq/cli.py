@@ -10,6 +10,13 @@ from typing import Any
 
 from variaq import __version__
 from variaq.adapter_scaffold import init_adapter
+from variaq.analysis.models import AnalysisQuery
+from variaq.analysis.operations import analyze_runs
+from variaq.analysis.reports import export_report, generate_report
+from variaq.campaigns.model import DEFAULT_MAX_RUNS, ExperimentCampaign
+from variaq.campaigns.plan import CampaignPlan
+from variaq.campaigns.runner import CampaignRunner
+from variaq.campaigns.store import CampaignStore
 from variaq.capabilities import gather_capabilities, render_capabilities_human
 from variaq.errors import ValidationError, VariaQError
 from variaq.experiments.runner import ExperimentRunner
@@ -364,6 +371,58 @@ def _build_parser() -> argparse.ArgumentParser:
     compare_quantum.add_argument("--repeats", type=int, default=1)
     compare_quantum.add_argument("--warmup", action=argparse.BooleanOptionalAction, default=False)
     compare_quantum.add_argument("--gpu-precision", choices=("fp32", "fp64"), default="fp32")
+
+    campaign = subcommands.add_parser("campaign", help="Plan, run, and list experiment campaigns")
+    campaign_commands = campaign.add_subparsers(dest="campaign_command", required=True)
+    campaign_plan = campaign_commands.add_parser("plan", parents=[_json_flag()])
+    campaign_plan.add_argument("campaign_file", type=Path)
+    campaign_run = campaign_commands.add_parser("run", parents=[_json_flag()])
+    campaign_run.add_argument("campaign_file", type=Path)
+    campaign_run.add_argument("--override-max-runs", action="store_true")
+    campaign_run.add_argument("--max-runs", type=int, default=DEFAULT_MAX_RUNS)
+    campaign_list = campaign_commands.add_parser("list", parents=[_json_flag()])
+    campaign_list.add_argument("--limit", type=int, default=100)
+    campaign_show = campaign_commands.add_parser("show", parents=[_json_flag()])
+    campaign_show.add_argument("campaign_id")
+
+    analyze = subcommands.add_parser("analyze", help="Analyze stored experiment runs")
+    analyze_commands = analyze.add_subparsers(dest="analyze_command", required=True)
+    analyze_runs_parser = analyze_commands.add_parser("runs", parents=[_json_flag()])
+    analyze_runs_parser.add_argument("--run-id", action="append", default=[])
+    analyze_runs_parser.add_argument("--group-by", action="append", default=[])
+    analyze_runs_parser.add_argument("--filter", action="append", default=[], metavar="KEY=VALUE")
+    analyze_runs_parser.add_argument("--scaling-x", default="problem_size")
+    analyze_runs_parser.add_argument("--include-failed", action="store_true")
+    analyze_runs_parser.add_argument("--include-unavailable", action="store_true")
+    analyze_campaign = analyze_commands.add_parser("campaign", parents=[_json_flag()])
+    analyze_campaign.add_argument("campaign_id")
+    analyze_campaign.add_argument("--group-by", action="append", default=[])
+    analyze_campaign.add_argument("--scaling-x", default="problem_size")
+    analyze_campaign.add_argument("--include-failed", action="store_true")
+    analyze_campaign.add_argument("--include-unavailable", action="store_true")
+    analyze_campaign.add_argument(
+        "--compare",
+        action="append",
+        default=[],
+        choices=["classical_vs_quantum", "qiskit_vs_cudaq", "gpu_vs_cpu"],
+    )
+
+    report = subcommands.add_parser("report", help="Generate reports from analysis results")
+    report_commands = report.add_subparsers(dest="report_command", required=True)
+    report_campaign = report_commands.add_parser("campaign", parents=[_json_flag()])
+    report_campaign.add_argument("campaign_id")
+    report_campaign.add_argument("--output-dir", type=Path, required=True)
+    report_campaign.add_argument("--formats", default="json,csv,markdown")
+    report_campaign.add_argument("--group-by", action="append", default=[])
+    report_campaign.add_argument("--scaling-x", default="problem_size")
+    report_campaign.add_argument("--overwrite", action="store_true")
+    report_campaign.add_argument("--plots", action="store_true")
+    report_campaign.add_argument(
+        "--compare",
+        action="append",
+        default=[],
+        choices=["classical_vs_quantum", "qiskit_vs_cudaq", "gpu_vs_cpu"],
+    )
 
     runs = subcommands.add_parser("runs", help="Inspect or reproduce durable experiment runs")
     runs_commands = runs.add_subparsers(dest="runs_command", required=True)
@@ -752,6 +811,188 @@ def _command_compare(args: argparse.Namespace, runner: ExperimentRunner) -> int:
     return run_status_for_exit(runs)
 
 
+def _filter_parameters(values: list[str]) -> dict[str, Any]:
+    result: dict[str, Any] = {}
+    for value in values:
+        if "=" not in value:
+            raise ValidationError(f"Filter must use KEY=VALUE: {value!r}")
+        key, raw = value.split("=", 1)
+        if not key:
+            raise ValidationError("Filter key cannot be empty")
+        result[key] = _json_value(raw)
+    return result
+
+
+def _command_campaign(
+    args: argparse.Namespace, runner: ExperimentRunner, campaign_store: CampaignStore
+) -> int:
+    if args.campaign_command == "list":
+        rows = campaign_store.list_campaigns(args.limit)
+        if args.json:
+            print(success_envelope(command="campaign list", data=rows))
+            return 0
+        print("Campaigns:")
+        for row in rows:
+            print(f"  {row['campaign_id']} {row['name']} ({row['family']}) {row['created_at']}")
+        return 0
+    if args.campaign_command == "show":
+        campaign = campaign_store.get_campaign(args.campaign_id)
+        if args.json:
+            print(success_envelope(command="campaign show", data=campaign.to_dict()))
+            return 0
+        print(json.dumps(campaign.to_dict(), indent=2, sort_keys=True))
+        return 0
+
+    campaign = ExperimentCampaign.from_dict(
+        json.loads(args.campaign_file.read_text(encoding="utf-8"))
+    )
+    if args.campaign_command == "plan":
+        plan = CampaignPlan(campaign).build()
+        if args.json:
+            print(success_envelope(command="campaign plan", data=plan))
+            return 0
+        print(f"Campaign plan: {plan['name']}")
+        print(f"  family: {plan['family']}")
+        print(f"  problem instances: {plan['problem_instance_count']}")
+        print(f"  requested runs: {plan['requested_runs']}")
+        print(f"  estimated quantum runs: {plan['estimated_quantum_runs']}")
+        print(f"  max binary variables: {plan['max_binary_variables']}")
+        for entry in plan["solver_breakdown"]:
+            print(
+                f"    {entry['solver']}: {entry['requested_runs']} runs "
+                f"(available={entry['available']})"
+            )
+        for warning in plan["warnings"]:
+            print(f"  warning: {warning}")
+        return 0
+
+    cr = CampaignRunner(runner, campaign_store, args.problems_dir, max_runs=args.max_runs)
+    summary = cr.run(campaign, override_max_runs=args.override_max_runs)
+    if args.json:
+        print(success_envelope(command="campaign run", data=summary))
+        return 0
+    print(f"Campaign {summary['campaign_id']} completed")
+    print(f"  requested: {summary['requested_runs']}")
+    print(f"  completed: {summary['completed_runs']}")
+    for status, count in summary["status_summary"].items():
+        print(f"  {status}: {count}")
+    return 0
+
+
+def _command_analyze(
+    args: argparse.Namespace, store: ExperimentStore, campaign_store: CampaignStore
+) -> int:
+    run_ids: list[str] = []
+    campaign_id: str | None = None
+    if args.analyze_command == "campaign":
+        campaign_id = args.campaign_id
+        run_ids = campaign_store.get_run_ids(campaign_id)
+    else:
+        run_ids = list(args.run_id)
+        if not run_ids:
+            # If no explicit run IDs, analyze all stored runs
+            limit = args.limit if hasattr(args, "limit") else 1000
+            summaries = store.list_runs(limit=limit)
+            run_ids = [s["run_id"] for s in summaries]
+    if not run_ids:
+        if args.json:
+            print(
+                error_envelope(
+                    command=f"analyze {args.analyze_command}",
+                    error=StructuredError(
+                        type="NoRunsError", message="No runs selected for analysis"
+                    ),
+                )
+            )
+        else:
+            print("error: No runs selected for analysis", file=sys.stderr)
+        return 2
+
+    runs = [store.get(rid) for rid in run_ids]
+    query = AnalysisQuery(
+        campaign_id=campaign_id,
+        run_ids=tuple(run_ids),
+        filters=_filter_parameters(args.filter) if hasattr(args, "filter") else {},
+        group_by=tuple(args.group_by) if args.group_by else (),
+        include_failed=args.include_failed,
+        include_unavailable=args.include_unavailable,
+    )
+    comparisons = tuple(args.compare) if hasattr(args, "compare") else ()
+    result = analyze_runs(runs, query, scaling_x_metric=args.scaling_x, comparisons=comparisons)
+    if args.json:
+        print(success_envelope(command=f"analyze {args.analyze_command}", data=result.to_dict()))
+        return 0
+    print(f"Analysis: {len(result.groups)} groups, {len(result.scaling_points)} scaling points")
+    for group in result.groups:
+        key = ", ".join(f"{k}={v}" for k, v in group.group_key.items())
+        print(f"  {key}: count={group.count} best={group.quality.best_objective}")
+    return 0
+
+
+def _command_report(
+    args: argparse.Namespace, store: ExperimentStore, campaign_store: CampaignStore
+) -> int:
+    run_ids = campaign_store.get_run_ids(args.campaign_id)
+    if not run_ids:
+        if args.json:
+            print(
+                error_envelope(
+                    command="report campaign",
+                    error=StructuredError(
+                        type="NoRunsError", message=f"Campaign {args.campaign_id!r} has no runs"
+                    ),
+                )
+            )
+        else:
+            print(f"error: Campaign {args.campaign_id!r} has no runs", file=sys.stderr)
+        return 2
+    runs = [store.get(rid) for rid in run_ids]
+    query = AnalysisQuery(
+        campaign_id=args.campaign_id,
+        run_ids=tuple(run_ids),
+        group_by=tuple(args.group_by) if args.group_by else ("problem_id", "solver"),
+        include_failed=True,
+    )
+    comparisons = tuple(args.compare) if args.compare else ()
+    analysis = analyze_runs(runs, query, scaling_x_metric=args.scaling_x, comparisons=comparisons)
+    report = generate_report(analysis, campaign_id=args.campaign_id)
+    formats = tuple(f.strip() for f in args.formats.split(",") if f.strip())
+    paths = export_report(report, args.output_dir, formats=formats, overwrite=args.overwrite)
+    if args.plots:
+        try:
+            plot_paths = export_report(
+                report, args.output_dir, formats=("plots",), overwrite=args.overwrite
+            )
+            paths["plots"] = plot_paths.get("plots", {})
+        except ImportError as exc:
+            if args.json:
+                print(
+                    partial_envelope(
+                        command="report campaign",
+                        data={"report_id": report.report_id, "paths": paths},
+                        warnings=(
+                            StructuredWarning(
+                                type="optional_dependency_missing",
+                                message=f"Plotting skipped: {exc}",
+                            ),
+                        ),
+                    )
+                )
+                return 0
+            print(f"warning: plotting skipped: {exc}", file=sys.stderr)
+    if args.json:
+        print(
+            success_envelope(
+                command="report campaign", data={"report_id": report.report_id, "paths": paths}
+            )
+        )
+        return 0
+    print(f"Report {report.report_id} exported")
+    for key, value in paths.items():
+        print(f"  {key}: {value}")
+    return 0
+
+
 def _command_runs(
     args: argparse.Namespace, store: ExperimentStore, runner: ExperimentRunner
 ) -> int:
@@ -798,6 +1039,7 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "capabilities":
             return _command_capabilities(args)
         store = ExperimentStore(args.db)
+        campaign_store = CampaignStore(args.db)
         runner = ExperimentRunner(store)
         if args.command == "solve":
             return _command_solve(args, runner)
@@ -807,6 +1049,12 @@ def main(argv: list[str] | None = None) -> int:
             return _command_suite(args, runner)
         if args.command == "compare":
             return _command_compare(args, runner)
+        if args.command == "campaign":
+            return _command_campaign(args, runner, campaign_store)
+        if args.command == "analyze":
+            return _command_analyze(args, store, campaign_store)
+        if args.command == "report":
+            return _command_report(args, store, campaign_store)
         return _command_runs(args, store, runner)
     except (VariaQError, FileExistsError, ValueError, KeyError) as exc:
         if getattr(args, "json", False):

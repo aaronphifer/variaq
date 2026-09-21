@@ -60,12 +60,18 @@ These are directions, not implemented features or delivery commitments.
   quantum solvers;
 - capability matrix derived from solver `supported_families` declarations.
 
-## v0.6 — analysis, reporting, and scaling
+## v0.6 — analysis, reporting, and scaling (in progress)
 
-- richer benchmark comparison JSON with additive v1 schema fields;
-- reproducible report generation and optional visualization helpers;
-- scaling summaries, problem-size sensitivity, and resource-use exports;
-- classical baseline refinements only where they add clear scientific value.
+- domain-neutral `ExperimentCampaign` definitions with deterministic IDs;
+- bounded local campaign runner with default run-count guard and failure isolation;
+- campaign/run membership persistence via additive SQLite tables;
+- domain-neutral analysis layer with typed grouping, quality, feasibility, timing,
+  resource, repeat, and scaling summaries;
+- objective-sense-aware metrics and structured feasibility analysis;
+- classical-vs-quantum, Qiskit-vs-CUDA-Q, and GPU-vs-CPU comparisons;
+- reproducible `ReportArtifact` model with deterministic IDs;
+- JSON, CSV, and Markdown report exports;
+- optional matplotlib plot generation from analysis data.
 
 ## v0.7 and later — heterogeneous execution, physical QPU exploration, and adapters
 
@@ -77,16 +83,10 @@ Possible external applications include cybersecurity, AI-agent scheduling,
 logistics, graph optimization, scientific computing, and materials research.
 They should use adapters rather than define VariaQ core.
 
-## Recommended next milestone: 0.6
+## Recommended next milestone: 0.7 local web UI
 
-The architecture introduced in 0.5 naturally points to v0.6:
-
-1. Build reproducible reports and optional visualizations on top of the
-   normalized result model.
-2. Add richer benchmark comparison fields and export helpers without breaking
-   schema version 1.
-3. Evaluate small classical-baseline refinements only where they add clear
-   scientific value.
-
-This keeps the next cycle focused on analysis and reporting rather than
-introducing unrelated large features.
+The 0.6 analysis/reporting layer provides a clean backend for visualization.
+A natural next milestone is a local web UI that consumes reports and campaigns
+without moving scientific logic into the frontend. Another candidate is stronger
+classical optimization baselines, evaluated only where they add clear scientific
+value.

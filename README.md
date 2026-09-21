@@ -156,6 +156,13 @@ variaq runs show <run-id>
 variaq runs reproduce <run-id>
 ```
 
+```bash
+variaq campaign plan examples/campaigns/maxcut_scaling.json --json
+variaq campaign run examples/campaigns/maxcut_scaling.json --json
+variaq analyze campaign <campaign-id> --json
+variaq report campaign <campaign-id> --output-dir ./reports
+```
+
 New in 0.4:
 
 ```bash

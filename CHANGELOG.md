@@ -3,6 +3,43 @@
 VariaQ follows semantic versioning while pre-1.0. Release dates will be added
 when a public release is created.
 
+## 0.6.0 — campaigns, analysis, and reporting
+
+- Added domain-neutral `ExperimentCampaign` definitions with deterministic IDs,
+  serializable JSON format, and family-specific generator parameters.
+- Added `variaq campaign plan|run|list|show` CLI commands.
+- Added bounded local campaign runner with default run-count guard and explicit
+  `--override-max-runs` escape hatch.
+- Added campaign/run membership persistence via additive SQLite tables; existing
+  run records and schema version `1` are preserved.
+- Added campaign failure isolation: one failed run does not stop the campaign.
+- Added domain-neutral analysis layer (`variaq.analysis`) with typed models for
+  grouping, quality, feasibility, timing, resource, repeat, and scaling summaries.
+- Added objective-sense-aware quality metrics: best/worst, gap, success-at-optimum,
+  and approximation ratio.
+- Added structured feasibility analysis including feasible/infeasible sample
+  counts and zero-feasible-run detection.
+- Added timing/resource analysis with labeled scopes and null semantics for
+  missing metadata.
+- Added repeat statistics (mean, median, std, min, max) with single-observation handling.
+- Added scaling summaries keyed to explicit x metrics.
+- Added classical-vs-quantum, Qiskit-vs-CUDA-Q, and GPU-vs-CPU comparison summaries.
+- Added reproducible `ReportArtifact` model with deterministic report IDs.
+- Added `variaq analyze runs|campaign` and `variaq report campaign` CLI commands.
+- Added JSON, CSV, and Markdown report exports with safe path handling and
+  `--overwrite` guard.
+- Added optional matplotlib plot generation from analysis data.
+- Added `docs/campaigns.md`, `docs/analysis.md`, `docs/reporting.md`, and
+  example campaigns under `examples/campaigns/`.
+- Added tests for campaigns, analysis, reports, exports, provenance, objective
+  sense, feasibility, scaling, and historical-record compatibility.
+- Preserved `schema_version = "1"` for CLI output and existing SQLite database
+  compatibility.
+
+No physical-QPU support is added. No Triagewall, Ollama Fleet, or bb-specific
+scheduling integration is added. No web UI is implemented. No commit, push, tag,
+or release is performed.
+
 ## 0.5.0 — generic binary quadratic QAOA
 
 - Introduced a backend-neutral `BinaryQuadraticModel` (`variaq.bqm`) as an
