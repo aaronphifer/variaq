@@ -1,0 +1,19 @@
+{
+  "campaign_format_version": "1",
+  "name": "assignment_e2e",
+  "family": "assignment",
+  "problem_sizes": [3, 4],
+  "problem_seeds": [1],
+  "solvers": ["exact", "heuristic", "qaoa"],
+  "repeats": 1,
+  "base_seed": 42,
+  "solver_config": {
+    "qaoa": {
+      "seed": 42,
+      "parameters": {"p": 1, "optimizer_trials": 8, "shots": 256}
+    }
+  },
+  "generator_parameters": {"resource_count": 3, "edge_probability": 0.5},
+  "tags": ["e2e"],
+  "notes": "Small Assignment campaign including bounded QAOA for feasibility analysis."
+}

@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "variaq"
-version = "0.5.0"
+version = "0.6.0"
 description = "Local-first reproducible comparison of classical, GPU-accelerated, and quantum methods"
 readme = "README.md"
 requires-python = ">=3.12"

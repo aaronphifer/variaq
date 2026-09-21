@@ -40,7 +40,7 @@ jobs:
       - name: Install
         run: python -m pip install -e '.[dev]'
       - name: Test
-        run: pytest tests/test_problems.py tests/test_new_families.py tests/test_identity.py tests/test_capabilities.py tests/test_json_contract.py tests/test_cli.py tests/test_experiments.py tests/test_bqm.py tests/test_family_qaoa.py
+        run: pytest tests/test_problems.py tests/test_new_families.py tests/test_identity.py tests/test_capabilities.py tests/test_json_contract.py tests/test_cli.py tests/test_experiments.py tests/test_bqm.py tests/test_family_qaoa.py tests/test_campaigns.py tests/test_analysis.py tests/test_sense_and_historical.py
       - name: Lint
         run: ruff check .
       - name: Formatting
