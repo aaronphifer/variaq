@@ -60,7 +60,7 @@ These are directions, not implemented features or delivery commitments.
   quantum solvers;
 - capability matrix derived from solver `supported_families` declarations.
 
-## v0.6 — analysis, reporting, and scaling (in progress)
+## v0.6 — analysis, reporting, and scaling (completed in 0.6.0)
 
 - domain-neutral `ExperimentCampaign` definitions with deterministic IDs;
 - bounded local campaign runner with default run-count guard and failure isolation;
@@ -73,20 +73,25 @@ These are directions, not implemented features or delivery commitments.
 - JSON, CSV, and Markdown report exports;
 - optional matplotlib plot generation from analysis data.
 
-## v0.7 and later — heterogeneous execution, physical QPU exploration, and adapters
+## v0.7 — local web UI (completed scope)
 
-- explicitly authorized physical QPU execution;
-- heterogeneous resources, optional remote workers, HPC/Slurm exploration,
-  optional server/API mode, and optional web UI.
+- optional local-first web interface over a shared application service layer;
+- versioned local JSON API (`/api/v1/`) with loopback-only default binding;
+- dashboard, problems, runs, campaigns, analysis, reports, and capabilities pages;
+- campaign plan-before-run workflow preserving the existing max-run guard;
+- in-process sequential campaign execution with status/progress (no worker queue);
+- analysis-visualization charts driven by structured `AnalysisResult` data;
+- safe report downloads confined to known report artifacts.
+
+## v0.8 and later — later exploration
+
+Future candidates after 0.7 (none committed): richer interactive charts on the
+existing API, campaign execution progress refinement, stronger classical
+baselines evaluated only where they add scientific value, Graph Partition
+quantum research, and optional authenticated LAN mode for trusted labs.
+Physical-QPU execution, remote workers, and cloud hosting remain out of scope
+pending explicit future design.
 
 Possible external applications include cybersecurity, AI-agent scheduling,
 logistics, graph optimization, scientific computing, and materials research.
 They should use adapters rather than define VariaQ core.
-
-## Recommended next milestone: 0.7 local web UI
-
-The 0.6 analysis/reporting layer provides a clean backend for visualization.
-A natural next milestone is a local web UI that consumes reports and campaigns
-without moving scientific logic into the frontend. Another candidate is stronger
-classical optimization baselines, evaluated only where they add clear scientific
-value.

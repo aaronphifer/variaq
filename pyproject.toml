@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "variaq"
-version = "0.6.0"
+version = "0.7.0"
 description = "Local-first reproducible comparison of classical, GPU-accelerated, and quantum methods"
 readme = "README.md"
 requires-python = ">=3.12"
@@ -40,9 +40,17 @@ cudaq = [
 ]
 dev = [
   "build>=1.2",
+  "httpx>=0.27",
   "numpy>=1.26",
   "pytest>=8,<10",
   "ruff>=0.11",
+]
+web = [
+  "fastapi>=0.115",
+  "jinja2>=3.1",
+  "pydantic>=2",
+  "python-multipart>=0.0.9",
+  "uvicorn>=0.30",
 ]
 
 [project.scripts]

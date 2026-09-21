@@ -21,7 +21,7 @@ def _project_version() -> str:
 
 class PublicIdentityTests(unittest.TestCase):
     def test_variaq_import_and_version(self) -> None:
-        self.assertEqual(variaq.__version__, "0.6.0")
+        self.assertEqual(variaq.__version__, "0.7.0")
 
     def test_package_version_matches_pyproject(self) -> None:
         self.assertEqual(variaq.__version__, _project_version())

@@ -1,0 +1,56 @@
+{% extends "base.html" %}
+{% block title %}Dashboard · VariaQ{% endblock %}
+{% block content %}
+<section class="page-head">
+  <h1>Dashboard</h1>
+  <p class="muted">Local VariaQ research state on this machine.</p>
+</section>
+<div id="dashboard-status" class="notice muted" role="status">Loading…</div>
+<div id="dashboard" hidden>
+  <section class="stat-grid" aria-label="Activity totals">
+    <div class="stat"><span class="stat-value" id="stat-problems">0</span><span class="stat-label">Problems</span></div>
+    <div class="stat"><span class="stat-value" id="stat-runs">0</span><span class="stat-label">Runs</span></div>
+    <div class="stat"><span class="stat-value" id="stat-campaigns">0</span><span class="stat-label">Campaigns</span></div>
+    <div class="stat"><span class="stat-value" id="stat-reports">0</span><span class="stat-label">Reports</span></div>
+  </section>
+
+  <p id="empty-hint" class="empty-state" hidden>
+    No experiments yet. Plan a campaign from
+    <a href="/campaigns/new">Campaigns → New campaign</a>, or use the CLI:
+    <code>variaq problem generate</code> then <code>variaq campaign run</code>.
+  </p>
+
+  <div class="grid-2col">
+    <section class="panel" aria-labelledby="recent-runs-h">
+      <h2 id="recent-runs-h">Recent runs</h2>
+      <div class="table-wrap">
+        <table class="data-table" id="recent-runs-table">
+          <thead><tr><th>Run</th><th>Solver</th><th>Status</th><th>Objective</th><th>Wall s</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </section>
+    <section class="panel" aria-labelledby="recent-campaigns-h">
+      <h2 id="recent-campaigns-h">Recent campaigns</h2>
+      <ul class="link-list" id="recent-campaigns-list"></ul>
+    </section>
+  </div>
+
+  <section class="panel" aria-labelledby="backend-state-h">
+    <h2 id="backend-state-h">Solver &amp; backend state</h2>
+    <div class="table-wrap">
+      <table class="data-table" id="solver-state-table">
+        <thead><tr><th>Solver</th><th>Installed</th><th>Available</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+    <dl class="kv" id="backend-facts"></dl>
+    <p class="muted" id="qpu-state"></p>
+  </section>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+window.VARIAQ_PAGE = "dashboard";
+</script>
+{% endblock %}

@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+{% block title %}Capabilities · VariaQ{% endblock %}
+{% block content %}
+<section class="page-head">
+  <h1>Capabilities</h1>
+  <p class="muted">Reported live by VariaQ for this installation and host.</p>
+</section>
+<p id="capabilities-status" class="notice muted" role="status">Loading…</p>
+<div id="capabilities" hidden>
+  <section class="panel" aria-labelledby="cap-variaq-h">
+    <h2 id="cap-variaq-h">VariaQ</h2>
+    <dl class="kv" id="cap-variaq"></dl>
+  </section>
+  <section class="panel" aria-labelledby="cap-solvers-h">
+    <h2 id="cap-solvers-h">Solvers</h2>
+    <div class="table-wrap">
+      <table class="data-table" id="cap-solvers-table">
+        <thead><tr><th>Solver</th><th>Supported</th><th>Installed</th><th>Available</th><th>Families</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </section>
+  <section class="panel" aria-labelledby="cap-frameworks-h">
+    <h2 id="cap-frameworks-h">Frameworks &amp; hardware</h2>
+    <dl class="kv" id="cap-frameworks"></dl>
+  </section>
+  <section class="panel" aria-labelledby="cap-qpu-h">
+    <h2 id="cap-qpu-h">Physical QPU</h2>
+    <p id="cap-qpu"></p>
+  </section>
+  <section class="panel" id="cap-warnings-panel" aria-labelledby="cap-warnings-h" hidden>
+    <h2 id="cap-warnings-h">Warnings</h2>
+    <ul id="cap-warnings"></ul>
+  </section>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>window.VARIAQ_PAGE = "capabilities";</script>
+{% endblock %}

@@ -28,13 +28,13 @@ results, and is designed to grow through problem, solver, backend, and adapter
 boundaries.
 
 VariaQ is not a claim of quantum advantage, production scheduler, distributed
-service, hardware benchmark based on simulator speed, web service, telemetry
+service, hardware benchmark based on simulator speed, hosted SaaS, telemetry
 collector, or cloud-account requirement. It cannot currently submit work to a
 physical QPU.
 
 ## Current capabilities
 
-VariaQ 0.5 supports domain-neutral optimization problem families:
+VariaQ 0.7 supports domain-neutral optimization problem families:
 
 - **MaxCut** — weighted graph partitioning into two sets.
 - **Assignment** — tasks/resources with scores, costs, capacities, demands, and
@@ -54,7 +54,7 @@ support:
   depends on the installed quantum backend and the binary-variable budget (see
   `variaq capabilities --json`).
 - **Graph Partitioning**: BQM lowering is implemented and tested, but quantum
-  support is experimental and not advertised for 0.5.0.
+  support is experimental and not advertised for 0.7.0.
 
 Solvers:
 
@@ -125,8 +125,20 @@ Choose the smallest installation needed:
 python -m pip install -e .                    # exact and heuristic
 python -m pip install -e '.[quantum]'         # add Qiskit
 python -m pip install -e '.[cudaq]'           # add CUDA-Q
+python -m pip install -e '.[web]'             # add the optional local web UI
 python -m pip install -e '.[dev,quantum,cudaq]'
 ```
+
+### Web UI (optional)
+
+```bash
+python -m pip install -e '.[web]'
+variaq web
+```
+
+Then open <http://127.0.0.1:8701>. The UI is local-first and loopback-only by
+default; see [docs/web-ui.md](docs/web-ui.md) for the security model, campaign
+workflow, and API.
 
 Python 3.12 or newer is required. CUDA-Q remains bounded to
 `>=0.16,<0.17` because upstream `observe` and `sample` interfaces are

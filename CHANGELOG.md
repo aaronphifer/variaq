@@ -3,6 +3,46 @@
 VariaQ follows semantic versioning while pre-1.0. Release dates will be added
 when a public release is created.
 
+## 0.7.0 — local web UI
+
+- Added an optional, local-first web interface (`pip install 'variaq[web]'`,
+  then `variaq web`) for inspecting capabilities, problems, runs, campaigns,
+  analysis, and reports. The UI is a presentation layer over VariaQ's existing
+  application services; it queries no database directly from the browser and
+  recomputes no scientific results.
+- Added a shared application/service facade (`variaq.services`) used by the web
+  server and available to future integrations, with bounded, offset-paginated,
+  filterable run and problem listings.
+- Added additive, read-only query methods to `ExperimentStore`
+  (`query_runs`, `iter_problem_summaries`, `iter_problem_run_summaries`,
+  `get_problem_definition`, `problem_run_count`) and reverse-lookup methods to
+  `CampaignStore` (`campaigns_for_run`, `campaigns_for_problem`). Existing run
+  records, problem artifacts, and schema version `1` are untouched.
+- Added a versioned local JSON API under `/api/v1/`, independent of the CLI
+  `schema_version`.
+- Added `variaq web` CLI command with loopback-only default (`127.0.0.1:8701`)
+  and a prominent warning when binding to a non-loopback address. The 0.7 UI is
+  local-first software and makes no internet-facing security claim.
+- Added `variaq.web` with a FastAPI application, Jinja2 templates, a vendored
+  Chart.js for campaign-scaling charts, and no Node.js requirement at runtime.
+- Campaign planning precedes execution in the UI. Campaign execution is local,
+  sequential, one-at-a-time, and owned by the server process; VariaQ's
+  default max-run guard (500 runs) is never bypassed and surfaces as a
+  requiring-override state in the UI.
+- Added run detail, problem detail, campaign detail, analysis, report, and
+  capabilities pages with objective/expectation/BQM energy displayed as distinct
+  labeled quantities, provenance (campaign membership, rerun lineage, source-run
+  counts), and empty states for a fresh install.
+- Added safe report downloads confined to files registered to a known report
+  artifact inside the configured reports root; path traversal is rejected.
+- Added `docs/web-ui.md` and `docs/web-ui-architecture.md`.
+- Added 46 web tests (`tests/web/`) covering the API, campaign plan/run,
+  analysis, report flow, scientific label contracts, loopback defaults, remote
+  bind warnings, traversal, malformed input, empty states, and a regression
+  guard that capability/status reads never mutate experiment storage.
+- No Triagewall, Ollama Fleet, bb scheduling, physical-QPU, or cloud-provider
+  code was added; `bb-plugin-variaq` is untouched.
+
 ## 0.6.0 — campaigns, analysis, and reporting
 
 - Added domain-neutral `ExperimentCampaign` definitions with deterministic IDs,
