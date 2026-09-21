@@ -39,14 +39,35 @@ These are directions, not implemented features or delivery commitments.
 - problem import/export and deterministic reference generators;
 - updated documentation and examples.
 
-## v0.5 — generic binary quadratic / QAOA and reporting
+## v0.5 — generic binary quadratic / QAOA (completed scope)
 
-- extend matched QAOA execution across eligible families using the lowered binary
-  quadratic representation;
-- stronger classical baselines;
-- scaling summaries, export, reproducible reports, and optional visualization.
+- authoritative backend-neutral `BinaryQuadraticModel` with documented convention,
+  validation, canonical pair ordering, and stable digests;
+- generic QAOA layer (`QAOAProblem`) that consumes a BQM and is agnostic to
+  problem-family semantics;
+- Qiskit and CUDA-Q CPU/GPU adapters refactored to use the same BQM,
+  variable ordering, parameter vectors, and Ising convention;
+- MaxCut migrated to the generic BQM path while preserving established numeric
+  behavior;
+- Assignment, Subset Selection, and Graph Partitioning enabled on the generic
+  QAOA path where the lowered representation is verified;
+- explicit penalty construction and metadata for constrained families;
+- decoded quantum samples evaluated by the original problem instance;
+- structured feasible/infeasible sample reporting, constraint violations, and
+  best-infeasible metrics;
+- resource guards based on binary variable count and estimated statevector memory;
+- `variaq compare quantum` generalized to any family supported by the selected
+  quantum solvers;
+- capability matrix derived from solver `supported_families` declarations.
 
-## v0.6 and later — heterogeneous execution, physical QPU exploration, and adapters
+## v0.6 — analysis, reporting, and scaling
+
+- richer benchmark comparison JSON with additive v1 schema fields;
+- reproducible report generation and optional visualization helpers;
+- scaling summaries, problem-size sensitivity, and resource-use exports;
+- classical baseline refinements only where they add clear scientific value.
+
+## v0.7 and later — heterogeneous execution, physical QPU exploration, and adapters
 
 - explicitly authorized physical QPU execution;
 - heterogeneous resources, optional remote workers, HPC/Slurm exploration,
@@ -56,16 +77,16 @@ Possible external applications include cybersecurity, AI-agent scheduling,
 logistics, graph optimization, scientific computing, and materials research.
 They should use adapters rather than define VariaQ core.
 
-## Recommended next milestone: 0.5
+## Recommended next milestone: 0.6
 
-The architecture introduced in 0.4 naturally points to v0.5:
+The architecture introduced in 0.5 naturally points to v0.6:
 
-1. Implement generic QAOA over the backend-neutral binary quadratic model for
-   families where the lowered representation is verified.
-2. Add stronger classical baselines (e.g. simulated annealing reference, local
-   search with swap moves).
-3. Build reproducible reports and optional visualizations on top of the
+1. Build reproducible reports and optional visualizations on top of the
    normalized result model.
+2. Add richer benchmark comparison fields and export helpers without breaking
+   schema version 1.
+3. Evaluate small classical-baseline refinements only where they add clear
+   scientific value.
 
-This keeps 0.5 focused on extending the 0.4 foundation rather than introducing
-unrelated large features.
+This keeps the next cycle focused on analysis and reporting rather than
+introducing unrelated large features.

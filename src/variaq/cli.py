@@ -290,8 +290,13 @@ def _build_parser() -> argparse.ArgumentParser:
     generate.add_argument("--task-count", type=int)
     generate.add_argument("--resource-count", type=int)
     generate.add_argument("--candidate-count", type=int)
+    generate.add_argument("--budget", type=float)
+    generate.add_argument("--min-cardinality", type=int)
+    generate.add_argument("--max-cardinality", type=int)
     generate.add_argument("--edge-probability", type=float)
     generate.add_argument("--partition-count", type=int)
+    generate.add_argument("--min-partition-size", type=int)
+    generate.add_argument("--max-partition-size", type=int)
     generate.add_argument("--seed", type=int, required=True)
     generate.add_argument("--output", type=Path)
     import_problem = problem_commands.add_parser(
@@ -384,14 +389,25 @@ def _generate_problem(args: argparse.Namespace) -> ProblemInstance:
     if family == "subset-selection":
         if args.candidate_count is None:
             raise ValidationError("subset-selection requires --candidate-count")
-        return SubsetSelectionProblem.generate(args.candidate_count, args.seed)
+        return SubsetSelectionProblem.generate(
+            args.candidate_count,
+            args.seed,
+            budget=args.budget,
+            min_cardinality=args.min_cardinality,
+            max_cardinality=args.max_cardinality,
+        )
     if family == "graph-partition":
         if args.nodes is None or args.edge_probability is None or args.partition_count is None:
             raise ValidationError(
                 "graph-partition requires --nodes, --edge-probability, and --partition-count"
             )
         return GraphPartitionProblem.generate(
-            args.nodes, args.edge_probability, args.partition_count, args.seed
+            args.nodes,
+            args.edge_probability,
+            args.partition_count,
+            args.seed,
+            min_partition_size=args.min_partition_size,
+            max_partition_size=args.max_partition_size,
         )
     raise ValidationError(f"Unsupported problem type: {family!r}")
 
@@ -465,6 +481,25 @@ def _command_problem(args: argparse.Namespace) -> int:
 def _command_solve(args: argparse.Namespace, runner: ExperimentRunner) -> int:
     problem = _resolve_problem(args.problem, args.problems_dir)
     solver = get_solver(args.solver)
+    if problem.family not in solver.supported_families:
+        if args.json:
+            print(
+                error_envelope(
+                    command="solve",
+                    error=StructuredError(
+                        type="UnsupportedFamilyError",
+                        message=(
+                            f"Solver {solver.name!r} does not support family {problem.family!r}"
+                        ),
+                    ),
+                )
+            )
+        else:
+            print(
+                f"error: Solver {solver.name!r} does not support family {problem.family!r}",
+                file=sys.stderr,
+            )
+        return 2
     run = runner.run_one(
         problem,
         solver,
@@ -530,6 +565,24 @@ def _configs(solvers: list[Any], seed: int, values: list[str]) -> dict[str, Solv
 def _command_benchmark(args: argparse.Namespace, runner: ExperimentRunner) -> int:
     problem = _resolve_problem(args.problem, args.problems_dir)
     solvers = _selected_solvers(args.solvers)
+    unsupported = [
+        solver.name for solver in solvers if problem.family not in solver.supported_families
+    ]
+    if unsupported:
+        message = f"Solvers {unsupported!r} do not support problem family {problem.family!r}"
+        if args.json:
+            print(
+                error_envelope(
+                    command="benchmark",
+                    error=StructuredError(
+                        type="UnsupportedFamilyError",
+                        message=message,
+                    ),
+                )
+            )
+        else:
+            print(f"error: {message}", file=sys.stderr)
+        return 2
     runs = runner.benchmark(
         problem,
         solvers,
@@ -623,6 +676,26 @@ def _command_compare(args: argparse.Namespace, runner: ExperimentRunner) -> int:
     ]
     if invalid:
         raise ValidationError(f"compare quantum accepts QAOA solvers only: {invalid}")
+    for solver in solvers:
+        if problem.family not in solver.supported_families:
+            if args.json:
+                print(
+                    error_envelope(
+                        command="compare quantum",
+                        error=StructuredError(
+                            type="UnsupportedFamilyError",
+                            message=(
+                                f"Solver {solver.name!r} does not support family {problem.family!r}"
+                            ),
+                        ),
+                    )
+                )
+            else:
+                print(
+                    f"error: Solver {solver.name!r} does not support family {problem.family!r}",
+                    file=sys.stderr,
+                )
+            return 2
     common = {
         "p": args.p,
         "optimizer_trials": args.optimizer_trials,

@@ -72,7 +72,6 @@ class LoweringTests(unittest.TestCase):
             ["a", "b"],
             {"a": 1.0, "b": 1.0},
             interaction={frozenset({"a", "b"}): 10.0},
-            budget=10.0,
         )
         model = lower_to_binary_quadratic(problem)
         best = None
@@ -172,9 +171,6 @@ class FamilyProblemTests(unittest.TestCase):
         problem = SubsetSelectionProblem.from_data(
             ["a", "b", "c"],
             {"a": 1.0, "b": 2.0, "c": 3.0},
-            budget=5.0,
-            cost={"a": 2.0, "b": 2.0, "c": 2.0},
-            max_cardinality=2,
         )
         serialized = problem.to_dict()
         loaded = SubsetSelectionProblem.from_dict(serialized)
@@ -220,9 +216,13 @@ class FamilyProblemTests(unittest.TestCase):
         from variaq.errors import ValidationError
         from variaq.solvers.qiskit_qaoa import QiskitQAOASolver
 
+        # Verify the solver's family check is enforced by patching
+        # supported_families to a smaller set.
         problem = AssignmentProblem.generate(2, 2, 1)
+        solver = QiskitQAOASolver()
+        solver.supported_families = frozenset({"maxcut"})
         with self.assertRaises(ValidationError):
-            QiskitQAOASolver().solve(problem, SolverConfig(seed=1))
+            solver.solve(problem, SolverConfig(seed=1))
 
 
 def _states(n: int):

@@ -1,3 +1,12 @@
+"""Generic QAOA model and shared search logic for backend-neutral BQM input.
+
+This layer consumes a :class:`variaq.bqm.BinaryQuadraticModel` and produces a
+backend-agnostic QAOA problem description: number of qubits, cost Hamiltonian
+coefficients, parameter convention, and candidate parameter vectors. It does
+not know about domain-specific semantics such as assignment budgets or graph
+partition balance.
+"""
+
 from __future__ import annotations
 
 import hashlib
@@ -8,9 +17,10 @@ from dataclasses import dataclass
 from time import perf_counter
 from typing import Any
 
+from variaq.bqm import BinaryQuadraticModel
 from variaq.errors import MissingOptionalDependency, ValidationError
-from variaq.models import Evaluation
-from variaq.problems.maxcut import MaxCutProblem
+from variaq.models import Evaluation, OptimizationSense
+from variaq.problems.base import ProblemInstance
 
 QAOA_SOLVER_NAMES = frozenset({"qaoa", "cudaq-cpu", "cudaq-gpu"})
 
@@ -115,6 +125,59 @@ def estimate_statevector_bytes(variable_count: int, precision: str) -> int:
 
 
 @dataclass(frozen=True, slots=True)
+class QAOAProblem:
+    """Backend-agnostic QAOA problem built from a BQM.
+
+    Fields:
+        bqm: the lowered binary quadratic model (authoritative lowering artifact)
+        num_variables: number of binary variables / qubits
+        p: QAOA depth
+        candidates: ordered tuple of candidate parameter vectors
+        candidate_digest: stable digest of candidate vectors
+        cost_linear: BQM linear coefficients in variable order
+        cost_quadratic: BQM quadratic coefficients as a list of (i, j, coeff)
+            with i < j and indices into the canonical variable ordering
+        cost_offset: BQM constant offset
+    """
+
+    bqm: BinaryQuadraticModel
+    num_variables: int
+    p: int
+    candidates: tuple[tuple[float, ...], ...]
+    candidate_digest: str
+    cost_linear: tuple[float, ...]
+    cost_quadratic: tuple[tuple[int, int, float], ...]
+    cost_offset: float
+
+
+def build_qaoa_problem(
+    problem: ProblemInstance,
+    bqm: BinaryQuadraticModel,
+    parameters: Mapping[str, Any],
+    seed: int,
+) -> QAOAProblem:
+    """Create a backend-agnostic QAOA problem from a lowered BQM."""
+    p, optimizer_trials, shots, warmup = common_qaoa_parameters(parameters)
+    candidates = resolve_parameter_candidates(parameters, p, optimizer_trials, seed)
+    variable_index = {var_id: index for index, var_id in enumerate(bqm.variable_ids)}
+    cost_linear = tuple(bqm.linear.get(var_id, 0.0) for var_id in bqm.variable_ids)
+    cost_quadratic = tuple(
+        (variable_index[i], variable_index[j], coeff)
+        for (i, j), coeff in sorted(bqm.quadratic.items())
+    )
+    return QAOAProblem(
+        bqm=bqm,
+        num_variables=len(bqm.variable_ids),
+        p=p,
+        candidates=candidates,
+        candidate_digest=candidate_parameter_digest(candidates),
+        cost_linear=cost_linear,
+        cost_quadratic=cost_quadratic,
+        cost_offset=bqm.offset,
+    )
+
+
+@dataclass(frozen=True, slots=True)
 class QAOASearchOutcome:
     candidate_parameters: tuple[tuple[float, ...], ...]
     candidate_expectations: tuple[float, ...]
@@ -123,7 +186,13 @@ class QAOASearchOutcome:
     best_expectation: float
     sample_counts: dict[tuple[int, ...], int]
     best_solution: tuple[int, ...]
+    best_solution_energy: float | None
     evaluation: Evaluation
+    feasible_sample_count: int
+    infeasible_sample_count: int
+    best_infeasible_solution: tuple[int, ...] | None
+    best_infeasible_energy: float | None
+    constraint_violations: tuple[str, ...]
     warmup_seconds: float
     parameter_search_seconds: float
     expectation_evaluation_seconds: float
@@ -131,7 +200,8 @@ class QAOASearchOutcome:
 
 
 def run_shared_parameter_search(
-    problem: MaxCutProblem,
+    problem: ProblemInstance,
+    qaoa: QAOAProblem,
     candidates: tuple[tuple[float, ...], ...],
     evaluate_expectation: Callable[[tuple[float, ...]], float],
     sample: Callable[[tuple[float, ...], int], Mapping[tuple[int, ...], int]],
@@ -163,7 +233,11 @@ def run_shared_parameter_search(
             )
         expectations.append(expectation)
     search_seconds = perf_counter() - search_started
-    best_index = max(range(len(expectations)), key=lambda index: (expectations[index], -index))
+
+    if problem.sense is OptimizationSense.MAXIMIZE:
+        best_index = max(range(len(expectations)), key=lambda index: (expectations[index], -index))
+    else:
+        best_index = min(range(len(expectations)), key=lambda index: (expectations[index], index))
 
     sampling_started = perf_counter()
     raw_counts = sample(candidates[best_index], shots)
@@ -172,23 +246,69 @@ def run_shared_parameter_search(
     if not sample_counts or sum(sample_counts.values()) <= 0:
         raise ValidationError("Backend returned no final samples")
 
-    best_solution: tuple[int, ...] | None = None
-    best_objective = float("-inf")
-    for solution, count in sorted(sample_counts.items()):
+    best_feasible_solution: tuple[int, ...] | None = None
+    best_feasible_objective: float | None = None
+    best_feasible_energy: float | None = None
+
+    best_infeasible_solution: tuple[int, ...] | None = None
+    best_infeasible_energy: float | None = None
+
+    feasible_count = 0
+    infeasible_count = 0
+    violation_messages: set[str] = set()
+
+    for solution, count in sample_counts.items():
         if count < 1:
             continue
-        evaluation = problem.evaluate(solution)
-        if not evaluation.feasible or evaluation.objective is None:
-            raise ValidationError(
-                f"Backend produced an invalid canonical solution {solution}: "
-                f"{evaluation.constraint_violations}"
-            )
-        if evaluation.objective > best_objective:
-            best_objective = evaluation.objective
-            best_solution = solution
-    if best_solution is None:
-        raise ValidationError("Backend returned no positive-count feasible samples")
-    final_evaluation = problem.evaluate(best_solution)
+        evaluation = problem.evaluate(qaoa.bqm.decode_bits(solution))
+        energy = qaoa.bqm.energy_from_bits(solution)
+        if evaluation.feasible and evaluation.objective is not None:
+            feasible_count += count
+            if best_feasible_objective is None or _better(
+                problem.sense, evaluation.objective, best_feasible_objective
+            ):
+                best_feasible_objective = evaluation.objective
+                best_feasible_solution = solution
+                best_feasible_energy = energy
+        else:
+            infeasible_count += count
+            if best_infeasible_energy is None or energy < best_infeasible_energy:
+                best_infeasible_solution = solution
+                best_infeasible_energy = energy
+            for violation in evaluation.constraint_violations:
+                violation_messages.add(violation)
+
+    if best_feasible_solution is None or best_feasible_objective is None:
+        # Structured partial result: no feasible sample found.
+        final_evaluation = Evaluation(
+            objective=None,
+            feasible=False,
+            constraint_violations=tuple(sorted(violation_messages)),
+        )
+        return QAOASearchOutcome(
+            candidate_parameters=candidates,
+            candidate_expectations=tuple(expectations),
+            best_parameter_index=best_index,
+            best_parameters=candidates[best_index],
+            best_expectation=expectations[best_index],
+            sample_counts=sample_counts,
+            best_solution=(
+                best_infeasible_solution if best_infeasible_solution is not None else tuple()
+            ),
+            best_solution_energy=best_infeasible_energy,
+            evaluation=final_evaluation,
+            feasible_sample_count=feasible_count,
+            infeasible_sample_count=infeasible_count,
+            best_infeasible_solution=best_infeasible_solution,
+            best_infeasible_energy=best_infeasible_energy,
+            constraint_violations=tuple(sorted(violation_messages)),
+            warmup_seconds=warmup_seconds,
+            parameter_search_seconds=search_seconds,
+            expectation_evaluation_seconds=expectation_seconds,
+            final_sampling_seconds=sampling_seconds,
+        )
+
+    final_evaluation = problem.evaluate(qaoa.bqm.decode_bits(best_feasible_solution))
     return QAOASearchOutcome(
         candidate_parameters=candidates,
         candidate_expectations=tuple(expectations),
@@ -196,13 +316,25 @@ def run_shared_parameter_search(
         best_parameters=candidates[best_index],
         best_expectation=expectations[best_index],
         sample_counts=sample_counts,
-        best_solution=best_solution,
+        best_solution=best_feasible_solution,
+        best_solution_energy=best_feasible_energy,
         evaluation=final_evaluation,
+        feasible_sample_count=feasible_count,
+        infeasible_sample_count=infeasible_count,
+        best_infeasible_solution=best_infeasible_solution,
+        best_infeasible_energy=best_infeasible_energy,
+        constraint_violations=tuple(sorted(violation_messages)),
         warmup_seconds=warmup_seconds,
         parameter_search_seconds=search_seconds,
         expectation_evaluation_seconds=expectation_seconds,
         final_sampling_seconds=sampling_seconds,
     )
+
+
+def _better(sense: OptimizationSense, candidate: float, best: float) -> bool:
+    if sense.value == "maximize":
+        return candidate > best
+    return candidate < best
 
 
 def common_qaoa_parameters(parameters: Mapping[str, Any]) -> tuple[int, int, int, bool]:
