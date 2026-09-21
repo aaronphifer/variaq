@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light">
+<title>{% block title %}VariaQ{% endblock %}</title>
+<link rel="stylesheet" href="/static/app.css">
+<link rel="icon" href="data:,">
+</head>
+<body>
+<a class="skip-link" href="#main">Skip to content</a>
+<header class="topbar">
+  <div class="topbar-inner">
+    <a class="brand" href="/">VariaQ</a>
+    <nav class="nav" aria-label="Primary">
+      <a href="/" {% if active_page == 'dashboard' %}aria-current="page"{% endif %}>Dashboard</a>
+      <a href="/campaigns" {% if active_page in ('campaigns', 'campaign_detail', 'campaign_new') %}aria-current="page"{% endif %}>Campaigns</a>
+      <a href="/runs" {% if active_page in ('runs', 'run_detail') %}aria-current="page"{% endif %}>Runs</a>
+      <a href="/problems" {% if active_page in ('problems', 'problem_detail') %}aria-current="page"{% endif %}>Problems</a>
+      <a href="/reports" {% if active_page in ('reports', 'report_detail') %}aria-current="page"{% endif %}>Reports</a>
+      <a href="/capabilities" {% if active_page == 'capabilities' %}aria-current="page"{% endif %}>Capabilities</a>
+    </nav>
+  </div>
+</header>
+<main id="main" class="container">
+{% block content %}{% endblock %}
+</main>
+<footer class="footer">
+  <span id="app-version">VariaQ local web UI</span> · <span class="muted">loopback research interface — data and computation stay on this machine</span>
+</footer>
+<script src="/static/vendor/chart.umd.min.js" defer></script>
+<script src="/static/app.js" defer></script>
+<script src="/static/app2.js" defer></script>
+{% block scripts %}{% endblock %}
+</body>
+</html>

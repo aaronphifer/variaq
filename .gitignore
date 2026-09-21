@@ -25,6 +25,8 @@ data/artifacts/*
 /experiments/
 /artifacts/
 /data/examples/
+/data/reports/
+/reports/
 
 # Legacy/root-level runtime paths used by older local invocations.
 /variaq.db

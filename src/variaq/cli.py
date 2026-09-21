@@ -432,6 +432,18 @@ def _build_parser() -> argparse.ArgumentParser:
     show_run.add_argument("run_id")
     reproduce = runs_commands.add_parser("reproduce", parents=[_json_flag()])
     reproduce.add_argument("run_id")
+
+    web = subcommands.add_parser(
+        "web", help="Start the optional local web UI (requires the 'web' extra)"
+    )
+    web.add_argument("--host", default=None, help="Bind address (default: 127.0.0.1)")
+    web.add_argument("--port", type=int, default=None, help="Port (default: 8701)")
+    web.add_argument(
+        "--reports-dir",
+        type=Path,
+        default=None,
+        help="Report output root (default: data/reports)",
+    )
     return parser
 
 
@@ -1028,6 +1040,32 @@ def _command_runs(
     return 0
 
 
+def _command_web(args: argparse.Namespace) -> int:
+    try:
+        from variaq.web import web_dependencies_available
+    except ImportError:
+        web_dependencies_available = None
+    if web_dependencies_available is None or not web_dependencies_available():
+        message = (
+            "The VariaQ web UI requires optional dependencies.\n"
+            "Install VariaQ with the web extra:\n"
+            "    pip install 'variaq[web]'"
+        )
+        print(message, file=sys.stderr)
+        return 2
+    from variaq.web.config import DEFAULT_HOST, DEFAULT_PORT, DEFAULT_REPORTS_DIR, WebConfig
+    from variaq.web.server import serve
+
+    config = WebConfig(
+        host=args.host or DEFAULT_HOST,
+        port=args.port if args.port is not None else DEFAULT_PORT,
+        db_path=args.db,
+        problems_dir=args.problems_dir,
+        reports_dir=args.reports_dir or DEFAULT_REPORTS_DIR,
+    )
+    return serve(config)
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = _build_parser()
     args = parser.parse_args(argv)
@@ -1038,6 +1076,8 @@ def main(argv: list[str] | None = None) -> int:
             return _command_adapter(args)
         if args.command == "capabilities":
             return _command_capabilities(args)
+        if args.command == "web":
+            return _command_web(args)
         store = ExperimentStore(args.db)
         campaign_store = CampaignStore(args.db)
         runner = ExperimentRunner(store)

@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+{% block title %}Problems · VariaQ{% endblock %}
+{% block content %}
+<section class="page-head">
+  <h1>Problems</h1>
+  <p class="muted">Problem instances stored with experiment runs.</p>
+</section>
+<form class="filters" id="problem-filters" role="search">
+  <label>Family
+    <select name="family">
+      <option value="">All</option>
+      <option value="maxcut">maxcut</option>
+      <option value="assignment">assignment</option>
+      <option value="subset-selection">subset-selection</option>
+      <option value="graph-partition">graph-partition</option>
+    </select>
+  </label>
+  <label>Search <input type="search" name="search" placeholder="problem id"></label>
+  <button type="submit">Apply</button>
+</form>
+<p id="problems-status" class="notice muted" role="status">Loading…</p>
+<div class="table-wrap" id="problems-wrap" hidden>
+  <table class="data-table" id="problems-table">
+    <thead><tr>
+      <th>Problem ID</th><th>Family</th><th>Size</th><th>Sense</th><th>Runs</th><th>Created</th>
+    </tr></thead>
+    <tbody></tbody>
+  </table>
+</div>
+<p class="muted" id="problems-count"></p>
+{% endblock %}
+{% block scripts %}
+<script>
+window.VARIAQ_PAGE = "problems";
+</script>
+{% endblock %}

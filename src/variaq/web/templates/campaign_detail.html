@@ -1,0 +1,77 @@
+{% extends "base.html" %}
+{% block title %}Campaign {{ campaign_id }} · VariaQ{% endblock %}
+{% block content %}
+<section class="page-head">
+  <h1 class="mono-wrap">Campaign <code>{{ campaign_id }}</code></h1>
+</section>
+<p id="campaign-status" class="notice muted" role="status">Loading…</p>
+<div id="campaign-detail" hidden>
+  <section class="panel" aria-labelledby="campaign-def-h">
+    <h2 id="campaign-def-h">Definition</h2>
+    <dl class="kv" id="campaign-def-kv"></dl>
+  </section>
+  <section class="panel" aria-labelledby="campaign-exec-h">
+    <h2 id="campaign-exec-h">Execution</h2>
+    <dl class="kv" id="campaign-exec-kv"></dl>
+    <h3>Member runs</h3>
+    <div class="table-wrap">
+      <table class="data-table" id="campaign-runs-table">
+        <thead><tr><th>Run</th><th>Solver</th><th>Problem</th><th>Status</th><th>Recorded</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+    <nav class="pager" aria-label="Campaign runs pagination">
+      <button id="campaign-runs-prev" type="button" disabled>Previous</button>
+      <span id="campaign-runs-page-info" class="muted"></span>
+      <button id="campaign-runs-next" type="button" disabled>Next</button>
+    </nav>
+  </section>
+  <section class="panel" aria-labelledby="campaign-analysis-h">
+    <h2 id="campaign-analysis-h">Analysis</h2>
+    <form class="filters" id="analysis-controls">
+      <label>Group by
+        <select name="group_by">
+          <option value="problem_id,solver">problem + solver</option>
+          <option value="solver">solver</option>
+          <option value="problem_id">problem</option>
+          <option value="problem_size,solver">size + solver</option>
+        </select>
+      </label>
+      <label>Scaling axis
+        <select name="scaling_x">
+          <option value="problem_size">problem size</option>
+          <option value="binary_variables">binary variables</option>
+          <option value="qubits">qubits</option>
+        </select>
+      </label>
+      <label class="check"><input type="checkbox" name="compare_cvq" checked> classical vs quantum</label>
+      <label class="check"><input type="checkbox" name="include_failed"> include failed</label>
+      <button type="submit">Re-run analysis</button>
+    </form>
+    <p class="provenance" id="analysis-provenance"></p>
+    <div id="analysis-body"></div>
+    <div class="chart-grid">
+      <figure class="chart-box"><figcaption>Objective gap vs size</figcaption><div class="chart-canvas"><canvas id="chart-gap"></canvas></div><table class="sr-data" id="chart-gap-table"></table></figure>
+      <figure class="chart-box"><figcaption>Wall time vs size</figcaption><div class="chart-canvas"><canvas id="chart-time"></canvas></div><table class="sr-data" id="chart-time-table"></table></figure>
+      <figure class="chart-box"><figcaption>Feasible sample rate vs size</figcaption><div class="chart-canvas"><canvas id="chart-feasible"></canvas></div><table class="sr-data" id="chart-feasible-table"></table></figure>
+      <figure class="chart-box"><figcaption>Qubits vs logical variables</figcaption><div class="chart-canvas"><canvas id="chart-qubits"></canvas></div><table class="sr-data" id="chart-qubits-table"></table></figure>
+    </div>
+  </section>
+  <section class="panel" aria-labelledby="campaign-reports-h">
+    <h2 id="campaign-reports-h">Reports</h2>
+    <ul class="link-list" id="campaign-reports-list"></ul>
+    <form id="report-form" class="filters">
+      <label class="check"><input type="checkbox" name="fmt_json" checked> JSON</label>
+      <label class="check"><input type="checkbox" name="fmt_csv" checked> CSV</label>
+      <label class="check"><input type="checkbox" name="fmt_md" checked> Markdown</label>
+      <label class="check"><input type="checkbox" name="fmt_plots"> Plots (matplotlib)</label>
+      <label class="check"><input type="checkbox" name="overwrite"> Overwrite existing</label>
+      <button type="submit">Generate report</button>
+    </form>
+    <p id="report-gen-status" class="notice" role="status"></p>
+  </section>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>window.VARIAQ_PAGE = "campaign_detail";</script>
+{% endblock %}

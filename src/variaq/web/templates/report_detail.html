@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+{% block title %}Report {{ report_id }} · VariaQ{% endblock %}
+{% block content %}
+<section class="page-head">
+  <h1 class="mono-wrap">Report <code>{{ report_id }}</code></h1>
+</section>
+<p id="report-status" class="notice muted" role="status">Loading…</p>
+<div id="report-detail" hidden>
+  <section class="panel" aria-labelledby="report-meta-h">
+    <h2 id="report-meta-h">Metadata</h2>
+    <dl class="kv" id="report-kv"></dl>
+    <p class="provenance" id="report-provenance"></p>
+  </section>
+  <section class="panel" aria-labelledby="report-files-h">
+    <h2 id="report-files-h">Files</h2>
+    <div class="table-wrap">
+      <table class="data-table" id="report-files-table">
+        <thead><tr><th>Name</th><th>Format</th><th>Size</th><th></th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </section>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>window.VARIAQ_PAGE = "report_detail";</script>
+{% endblock %}

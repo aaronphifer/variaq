@@ -140,6 +140,30 @@ class CampaignStore:
             ).fetchall()
         return [dict(row) for row in rows]
 
+    def campaigns_for_run(self, run_id: str) -> list[dict[str, Any]]:
+        with self._connection() as connection:
+            rows = connection.execute(
+                """
+                SELECT c.campaign_id, c.name, c.family, c.created_at
+                FROM campaigns c JOIN campaign_runs cr ON cr.campaign_id = c.campaign_id
+                WHERE cr.run_id = ? ORDER BY c.created_at DESC
+                """,
+                (run_id,),
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def campaigns_for_problem(self, problem_id: str) -> list[dict[str, Any]]:
+        with self._connection() as connection:
+            rows = connection.execute(
+                """
+                SELECT DISTINCT c.campaign_id, c.name, c.family, c.created_at
+                FROM campaigns c JOIN campaign_runs cr ON cr.campaign_id = c.campaign_id
+                WHERE cr.problem_id = ? ORDER BY c.created_at DESC
+                """,
+                (problem_id,),
+            ).fetchall()
+        return [dict(row) for row in rows]
+
     def count(self) -> int:
         with self._connection() as connection:
             return int(connection.execute("SELECT COUNT(*) FROM campaigns").fetchone()[0])

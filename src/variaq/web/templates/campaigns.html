@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+{% block title %}Campaigns · VariaQ{% endblock %}
+{% block content %}
+<section class="page-head page-head-row">
+  <div>
+    <h1>Campaigns</h1>
+    <p class="muted">Reproducible experiment campaigns stored in the local database.</p>
+  </div>
+  <a class="button" href="/campaigns/new">New campaign</a>
+</section>
+<div id="active-task-region" hidden></div>
+<p id="campaigns-status" class="notice muted" role="status">Loading…</p>
+<div class="table-wrap" id="campaigns-wrap" hidden>
+  <table class="data-table" id="campaigns-table">
+    <thead><tr>
+      <th>Campaign</th><th>Name</th><th>Family</th><th>Created</th>
+      <th>Requested</th><th>Completed</th><th>Status counts</th>
+    </tr></thead>
+    <tbody></tbody>
+  </table>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>window.VARIAQ_PAGE = "campaigns";</script>
+{% endblock %}

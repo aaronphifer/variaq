@@ -75,8 +75,20 @@ class CampaignRunner:
         self.max_runs = max_runs
 
     def run(
-        self, campaign: ExperimentCampaign, *, override_max_runs: bool = False
+        self,
+        campaign: ExperimentCampaign,
+        *,
+        override_max_runs: bool = False,
+        on_run_recorded: Any | None = None,
+        should_abort: Any | None = None,
     ) -> dict[str, Any]:
+        """Execute a campaign sequentially.
+
+        ``on_run_recorded`` (optional) is invoked after each run is persisted and
+        associated with the campaign; ``should_abort`` (optional) is polled before
+        each problem to allow cooperative cancellation by an embedding process
+        such as the web UI task manager. Defaults preserve existing CLI behavior.
+        """
         requested = campaign.requested_runs
         if requested > self.max_runs and not override_max_runs:
             raise ValidationError(
@@ -97,9 +109,16 @@ class CampaignRunner:
             "unavailable": 0,
             "skipped": 0,
         }
+        aborted = False
 
         for size in campaign.problem_sizes:
+            if should_abort is not None and should_abort():
+                aborted = True
+                break
             for seed in campaign.problem_seeds:
+                if should_abort is not None and should_abort():
+                    aborted = True
+                    break
                 key = (size, seed)
                 if key not in generated_problems:
                     generated_problems[key] = _generate_problem(
@@ -154,6 +173,22 @@ class CampaignRunner:
                         problem_id=run.result.problem_id,
                         created_at=run.created_at,
                     )
+                    if on_run_recorded is not None:
+                        on_run_recorded(run, len(all_runs))
+
+        if aborted:
+            summary_statuses["aborted"] = 1
+            return {
+                "campaign_id": campaign_id,
+                "name": campaign.name,
+                "family": campaign.family,
+                "requested_runs": requested,
+                "completed_runs": len(all_runs),
+                "status_summary": summary_statuses,
+                "problem_ids": sorted({run.result.problem_id for run in all_runs}),
+                "run_ids": [run.run_id for run in all_runs],
+                "aborted": True,
+            }
 
         return {
             "campaign_id": campaign_id,

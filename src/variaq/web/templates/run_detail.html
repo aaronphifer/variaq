@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+{% block title %}Run {{ run_id }} · VariaQ{% endblock %}
+{% block content %}
+<section class="page-head">
+  <h1 class="mono-wrap">Run <code>{{ run_id }}</code></h1>
+</section>
+<p id="run-status" class="notice muted" role="status">Loading…</p>
+<div id="run-detail" hidden>
+  <section class="panel" aria-labelledby="run-result-h">
+    <h2 id="run-result-h">Result</h2>
+    <div id="run-messages" hidden></div>
+    <dl class="kv" id="run-result-kv"></dl>
+    <h3>Solution</h3>
+    <pre class="json-block" id="run-solution"></pre>
+  </section>
+  <section class="panel" id="run-quantum-panel" aria-labelledby="run-quantum-h" hidden>
+    <h2 id="run-quantum-h">Quantum / BQM</h2>
+    <dl class="kv" id="run-quantum-kv"></dl>
+  </section>
+  <section class="panel" aria-labelledby="run-backend-h">
+    <h2 id="run-backend-h">Backend</h2>
+    <dl class="kv" id="run-backend-kv"></dl>
+  </section>
+  <section class="panel" aria-labelledby="run-prov-h">
+    <h2 id="run-prov-h">Provenance</h2>
+    <dl class="kv" id="run-prov-kv"></dl>
+  </section>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>window.VARIAQ_PAGE = "run_detail";</script>
+{% endblock %}

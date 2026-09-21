@@ -1,0 +1,67 @@
+{% extends "base.html" %}
+{% block title %}New campaign · VariaQ{% endblock %}
+{% block content %}
+<section class="page-head">
+  <h1>New campaign</h1>
+  <p class="muted">Define a campaign, review its plan, then run it. Execution is local and sequential.</p>
+</section>
+<form id="campaign-form" class="campaign-form" novalidate>
+  <div class="grid-2col">
+    <fieldset>
+      <legend>Identity</legend>
+      <label>Name <input type="text" name="name" required maxlength="200" placeholder="e.g. maxcut-scaling-aug"></label>
+      <label>Family
+        <select name="family" id="campaign-family">
+          <option value="maxcut">maxcut</option>
+          <option value="assignment">assignment</option>
+          <option value="subset-selection">subset-selection</option>
+          <option value="graph-partition">graph-partition</option>
+        </select>
+      </label>
+      <label>Notes <input type="text" name="notes" maxlength="4000" placeholder="optional"></label>
+    </fieldset>
+    <fieldset>
+      <legend>Problem grid</legend>
+      <label>Problem sizes <span class="muted">(comma-separated)</span>
+        <input type="text" name="problem_sizes" required value="6, 8, 10"></label>
+      <label>Problem seeds <span class="muted">(comma-separated)</span>
+        <input type="text" name="problem_seeds" required value="1, 2"></label>
+      <label>Repeats per solver <input type="number" name="repeats" min="1" max="100" value="1"></label>
+      <label>Base seed <input type="number" name="base_seed" value="0"></label>
+    </fieldset>
+  </div>
+  <fieldset>
+    <legend>Solvers</legend>
+    <div id="solver-picker" class="check-row" role="group" aria-label="Solvers"></div>
+    <p class="muted" id="solver-hint">Availability is checked from VariaQ capabilities when you plan.</p>
+  </fieldset>
+  <fieldset id="family-params">
+    <legend>Generator parameters <span class="muted">(family-specific)</span></legend>
+    <div id="family-param-fields" class="grid-2col"></div>
+  </fieldset>
+  <div class="actions">
+    <button type="submit" class="button">Plan campaign</button>
+  </div>
+</form>
+
+<section id="plan-section" class="panel" hidden aria-labelledby="plan-h">
+  <h2 id="plan-h">Plan</h2>
+  <div id="plan-body"></div>
+  <form id="run-form">
+    <div id="plan-override" class="notice warn" hidden>
+      <p id="plan-override-text"></p>
+      <label class="check">
+        <input type="checkbox" name="override_max_runs" id="override-max-runs">
+        I understand this requests more runs than the default safety maximum and want to proceed.
+      </label>
+    </div>
+    <div class="actions">
+      <button type="submit" class="button primary" id="run-campaign-btn">Run campaign</button>
+      <span id="run-status" class="notice" role="status"></span>
+    </div>
+  </form>
+</section>
+{% endblock %}
+{% block scripts %}
+<script>window.VARIAQ_PAGE = "campaign_new";</script>
+{% endblock %}

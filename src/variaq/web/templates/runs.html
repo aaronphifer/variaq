@@ -1,0 +1,49 @@
+{% extends "base.html" %}
+{% block title %}Runs · VariaQ{% endblock %}
+{% block content %}
+<section class="page-head">
+  <h1>Runs</h1>
+  <p class="muted">Stored experiment runs. Filters compose.</p>
+</section>
+<form class="filters" id="run-filters" role="search">
+  <label>Family
+    <select name="family">
+      <option value="">All</option>
+      <option value="maxcut">maxcut</option>
+      <option value="assignment">assignment</option>
+      <option value="subset-selection">subset-selection</option>
+      <option value="graph-partition">graph-partition</option>
+    </select>
+  </label>
+  <label>Solver <input type="text" name="solver" placeholder="exact, heuristic…"></label>
+  <label>Backend <input type="text" name="backend" placeholder="classical, aer-statevector…"></label>
+  <label>Status
+    <select name="status">
+      <option value="">All</option>
+      <option value="success">success</option>
+      <option value="failed">failed</option>
+      <option value="unavailable">unavailable</option>
+    </select>
+  </label>
+  <label>Campaign <input type="text" name="campaign_id" placeholder="campaign-…"></label>
+  <button type="submit">Apply</button>
+</form>
+<p id="runs-status" class="notice muted" role="status">Loading…</p>
+<div class="table-wrap" id="runs-wrap" hidden>
+  <table class="data-table" id="runs-table">
+    <thead><tr>
+      <th>Run ID</th><th>Time (UTC)</th><th>Family</th><th>Problem</th><th>Solver</th>
+      <th>Backend</th><th>Status</th><th>Objective</th><th>Feasible</th><th>Wall s</th>
+    </tr></thead>
+    <tbody></tbody>
+  </table>
+</div>
+<nav class="pager" aria-label="Runs pagination">
+  <button id="runs-prev" type="button" disabled>Previous</button>
+  <span id="runs-page-info" class="muted"></span>
+  <button id="runs-next" type="button" disabled>Next</button>
+</nav>
+{% endblock %}
+{% block scripts %}
+<script>window.VARIAQ_PAGE = "runs";</script>
+{% endblock %}

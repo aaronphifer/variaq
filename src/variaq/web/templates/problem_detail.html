@@ -1,0 +1,34 @@
+{% extends "base.html" %}
+{% block title %}Problem {{ problem_id }} · VariaQ{% endblock %}
+{% block content %}
+<section class="page-head">
+  <h1 class="mono-wrap">Problem <code>{{ problem_id }}</code></h1>
+</section>
+<p id="problem-status" class="notice muted" role="status">Loading…</p>
+<div id="problem-detail" hidden>
+  <section class="panel" aria-labelledby="problem-summary-h">
+    <h2 id="problem-summary-h">Summary</h2>
+    <dl class="kv" id="problem-kv"></dl>
+  </section>
+  <section class="panel" aria-labelledby="problem-def-h">
+    <h2 id="problem-def-h">Canonical definition</h2>
+    <pre class="json-block" id="problem-definition"></pre>
+  </section>
+  <section class="panel" aria-labelledby="problem-runs-h">
+    <h2 id="problem-runs-h">Runs on this problem</h2>
+    <div class="table-wrap">
+      <table class="data-table" id="problem-runs-table">
+        <thead><tr><th>Run</th><th>Solver</th><th>Status</th><th>Objective</th><th>Feasible</th><th>Wall s</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </section>
+  <section class="panel" aria-labelledby="problem-campaigns-h">
+    <h2 id="problem-campaigns-h">Campaigns containing this problem</h2>
+    <ul class="link-list" id="problem-campaigns-list"></ul>
+  </section>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>window.VARIAQ_PAGE = "problem_detail";</script>
+{% endblock %}

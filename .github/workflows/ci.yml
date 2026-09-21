@@ -18,7 +18,7 @@ jobs:
           python-version: "3.12"
           cache: pip
       - name: Install
-        run: python -m pip install -e '.[dev,quantum]'
+        run: python -m pip install -e '.[dev,quantum,web]'
       - name: Test
         run: pytest
       - name: Lint
@@ -38,9 +38,9 @@ jobs:
           python-version: "3.12"
           cache: pip
       - name: Install
-        run: python -m pip install -e '.[dev]'
+        run: python -m pip install -e '.[dev,web]'
       - name: Test
-        run: pytest tests/test_problems.py tests/test_new_families.py tests/test_identity.py tests/test_capabilities.py tests/test_json_contract.py tests/test_cli.py tests/test_experiments.py tests/test_bqm.py tests/test_family_qaoa.py tests/test_campaigns.py tests/test_analysis.py tests/test_sense_and_historical.py
+        run: pytest tests/test_problems.py tests/test_new_families.py tests/test_identity.py tests/test_capabilities.py tests/test_json_contract.py tests/test_cli.py tests/test_experiments.py tests/test_bqm.py tests/test_family_qaoa.py tests/test_campaigns.py tests/test_analysis.py tests/test_sense_and_historical.py tests/web
       - name: Lint
         run: ruff check .
       - name: Formatting
