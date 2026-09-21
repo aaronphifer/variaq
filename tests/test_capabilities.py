@@ -67,9 +67,9 @@ class CapabilityTests(unittest.TestCase):
         for name, expected in (
             ("exact", {"maxcut", "assignment", "subset-selection", "graph-partition"}),
             ("heuristic", {"maxcut", "assignment", "subset-selection", "graph-partition"}),
-            ("qaoa", {"maxcut"}),
-            ("cudaq-cpu", {"maxcut"}),
-            ("cudaq-gpu", {"maxcut"}),
+            ("qaoa", {"maxcut", "assignment", "subset-selection"}),
+            ("cudaq-cpu", {"maxcut", "assignment", "subset-selection"}),
+            ("cudaq-gpu", {"maxcut", "assignment", "subset-selection"}),
         ):
             with self.subTest(name=name):
                 entry = _solver_capability(name)
@@ -80,7 +80,10 @@ class CapabilityTests(unittest.TestCase):
         with mock.patch("variaq.solvers.qiskit_qaoa._load_quantum_dependencies") as load:
             load.side_effect = ImportError("simulated missing qiskit")
             entry = _solver_capability("qaoa")
-        self.assertEqual(set(entry.supported_families), {"maxcut"})
+        self.assertEqual(
+            set(entry.supported_families),
+            {"maxcut", "assignment", "subset-selection"},
+        )
         self.assertFalse(entry.available)
 
     def test_physical_qpu_reason_has_no_stale_version(self) -> None:

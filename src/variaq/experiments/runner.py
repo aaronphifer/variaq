@@ -184,7 +184,8 @@ class ExperimentRunner:
         benchmark_id = f"benchmark-{uuid4()}"
         pending: list[ExperimentRun] = []
         repeat_configs = [
-            self._matched_repeat_configs(solver_list, configs, repeat) for repeat in range(repeats)
+            self._matched_repeat_configs(problem, solver_list, configs, repeat)
+            for repeat in range(repeats)
         ]
         for solver in solver_list:
             for repeat in range(repeats):
@@ -224,7 +225,10 @@ class ExperimentRunner:
 
     @staticmethod
     def _matched_repeat_configs(
-        solvers: list[Solver], configs: dict[str, SolverConfig], repeat: int
+        problem: ProblemInstance,
+        solvers: list[Solver],
+        configs: dict[str, SolverConfig],
+        repeat: int,
     ) -> dict[str, SolverConfig]:
         prepared = {
             solver.name: SolverConfig(
@@ -236,6 +240,14 @@ class ExperimentRunner:
         quantum_names = [solver.name for solver in solvers if solver.name in QAOA_SOLVER_NAMES]
         if len(quantum_names) < 2:
             return prepared
+
+        for name in quantum_names:
+            solver = next(s for s in solvers if s.name == name)
+            problem_family = problem.family
+            if problem_family not in solver.supported_families:
+                raise ValidationError(
+                    f"Solver {name!r} does not support problem family {problem_family!r}"
+                )
 
         resolved: dict[str, tuple[int, int, int, bool]] = {
             name: common_qaoa_parameters(prepared[name].parameters) for name in quantum_names

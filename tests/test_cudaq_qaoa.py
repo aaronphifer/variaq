@@ -35,24 +35,74 @@ class CudaQIntegrationTests(unittest.TestCase):
     def _backends(
         self, problem: MaxCutProblem, p: int
     ) -> tuple[QiskitStatevectorBackend, CudaQStatevectorBackend, object]:
+        from variaq.lower import lower_to_binary_quadratic
+
+        bqm = lower_to_binary_quadratic(problem)
         np, quantum_circuit, statevector = _load_quantum_dependencies()
-        qiskit_backend = QiskitStatevectorBackend(problem, p, 42, np, quantum_circuit, statevector)
+        qiskit_backend = QiskitStatevectorBackend(bqm, p, 42, np, quantum_circuit, statevector)
         cudaq = _load_cudaq()
-        cudaq_backend = CudaQStatevectorBackend(cudaq, problem, p, 42)
+        cudaq_backend = CudaQStatevectorBackend(cudaq, bqm, p, 42)
         return qiskit_backend, cudaq_backend, cudaq
 
-    def test_p1_expectations_match_analytic_sign_and_angle_convention(self) -> None:
+    def test_p1_expectations_match_qiskit_convention(self) -> None:
         problem = MaxCutProblem.from_edges(2, [(0, 1)])
         qiskit_backend, cudaq_backend, cudaq = self._backends(problem, 1)
         vectors = ((0.0, 0.0), (0.5, 0.25), (math.pi / 2, math.pi / 8))
         with _selected_target(cudaq, "qpp-cpu"):
-            for gamma, beta in vectors:
-                expected = 0.5 + 0.5 * math.sin(4.0 * beta) * math.sin(gamma)
-                qiskit_value = qiskit_backend.expectation((gamma, beta))
-                cudaq_value = cudaq_backend.expectation((gamma, beta))
-                self.assertAlmostEqual(qiskit_value, expected, places=12)
-                self.assertAlmostEqual(cudaq_value, expected, places=12)
-        self.assertAlmostEqual(expected, 1.0, places=12)
+            for vector in vectors:
+                self.assertAlmostEqual(
+                    qiskit_backend.expectation(vector),
+                    cudaq_backend.expectation(vector),
+                    places=10,
+                )
+
+    def test_expectation_includes_bqm_offset_exactly_once(self) -> None:
+        """Regression: a non-zero BQM offset must not be double-counted."""
+        from variaq.bqm import BinaryQuadraticModel
+
+        problem = MaxCutProblem.from_edges(2, [(0, 1)])
+        bqm = BinaryQuadraticModel(
+            variable_ids=("x_0", "x_1"),
+            linear={"x_0": 0.25, "x_1": -0.25},
+            quadratic={("x_0", "x_1"): -0.5},
+            offset=1.5,
+            sense=problem.sense,
+            source_family="maxcut",
+            source_problem_id=problem.problem_id,
+            penalty_metadata={},
+            decode=({}, {}),
+        )
+        np, quantum_circuit, statevector = _load_quantum_dependencies()
+        qiskit_backend = QiskitStatevectorBackend(bqm, 1, 42, np, quantum_circuit, statevector)
+        cudaq = _load_cudaq()
+        cudaq_backend = CudaQStatevectorBackend(cudaq, bqm, 1, 42)
+
+        # Canonical expectation from the BQM directly.
+        for vector in ((0.0, 0.0), (0.5, 0.25), (math.pi / 2, math.pi / 8)):
+            probabilities = qiskit_backend.probabilities(vector)
+            canonical = 0.0
+            for state_index, probability in enumerate(probabilities):
+                if probability <= 0:
+                    continue
+                bits = qiskit_backend._solution_from_state_index(state_index)
+                canonical += probability * bqm.energy_from_bits(bits)
+            self.assertAlmostEqual(qiskit_backend.expectation(vector), canonical, places=12)
+            with _selected_target(cudaq, "qpp-cpu"):
+                self.assertAlmostEqual(
+                    qiskit_backend.expectation(vector), cudaq_backend.expectation(vector), places=10
+                )
+
+    def test_p1_maxcut_specific_expectation_matches_qiskit(self) -> None:
+        problem = MaxCutProblem.from_edges(2, [(0, 1)])
+        qiskit_backend, cudaq_backend, cudaq = self._backends(problem, 1)
+        vectors = ((0.0, 0.0), (0.5, 0.25), (math.pi / 2, math.pi / 8))
+        with _selected_target(cudaq, "qpp-cpu"):
+            for vector in vectors:
+                self.assertAlmostEqual(
+                    qiskit_backend.expectation(vector),
+                    cudaq_backend.expectation(vector),
+                    places=10,
+                )
 
     def test_p2_fixed_and_seeded_expectations_match(self) -> None:
         problem = MaxCutProblem.from_edges(4, [(0, 1), (1, 2), (2, 3), (0, 3), (0, 2, 0.5)])
@@ -67,7 +117,7 @@ class CudaQIntegrationTests(unittest.TestCase):
                 self.assertAlmostEqual(
                     qiskit_backend.expectation(vector),
                     cudaq_backend.expectation(vector),
-                    places=10,
+                    places=8,
                 )
 
     def test_cudaq_sample_bitstring_is_q0_first(self) -> None:

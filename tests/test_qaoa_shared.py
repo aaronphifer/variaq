@@ -8,6 +8,7 @@ from variaq.problems.base import ProblemInstance
 from variaq.problems.maxcut import MaxCutProblem
 from variaq.solvers.base import Solver
 from variaq.solvers.qaoa_shared import (
+    QAOAProblem,
     candidate_parameter_digest,
     canonical_solution_from_cudaq_bitstring,
     canonical_solution_from_state_index,
@@ -18,6 +19,7 @@ from variaq.solvers.qaoa_shared import (
 
 class NamedTestSolver(Solver):
     version = "test"
+    supported_families = frozenset({"maxcut"})
 
     def __init__(self, name: str) -> None:
         self.name = name
@@ -37,7 +39,10 @@ class SharedQAOATests(unittest.TestCase):
         self.assertEqual(candidate_parameter_digest(first), candidate_parameter_digest(second))
 
     def test_runner_injects_one_identical_candidate_sequence(self) -> None:
-        solvers = [NamedTestSolver("qaoa"), NamedTestSolver("cudaq-cpu")]
+        from variaq.problems.maxcut import MaxCutProblem
+
+        problem = MaxCutProblem.from_edges(2, [(0, 1)])
+        solvers: list[Solver] = [NamedTestSolver("qaoa"), NamedTestSolver("cudaq-cpu")]
         configs = {
             name: SolverConfig(
                 seed=42,
@@ -45,20 +50,23 @@ class SharedQAOATests(unittest.TestCase):
             )
             for name in ("qaoa", "cudaq-cpu")
         }
-        prepared = ExperimentRunner._matched_repeat_configs(solvers, configs, repeat=0)
+        prepared = ExperimentRunner._matched_repeat_configs(problem, solvers, configs, repeat=0)
         qiskit_candidates = prepared["qaoa"].parameters["candidate_parameters"]
         cudaq_candidates = prepared["cudaq-cpu"].parameters["candidate_parameters"]
         self.assertEqual(qiskit_candidates, cudaq_candidates)
         self.assertIs(qiskit_candidates, cudaq_candidates)
 
     def test_runner_rejects_mismatched_quantum_configuration(self) -> None:
-        solvers = [NamedTestSolver("qaoa"), NamedTestSolver("cudaq-cpu")]
+        from variaq.problems.maxcut import MaxCutProblem
+
+        problem = MaxCutProblem.from_edges(2, [(0, 1)])
+        solvers: list[Solver] = [NamedTestSolver("qaoa"), NamedTestSolver("cudaq-cpu")]
         configs = {
             "qaoa": SolverConfig(parameters={"p": 1}),
             "cudaq-cpu": SolverConfig(parameters={"p": 2}),
         }
         with self.assertRaisesRegex(ValidationError, "identical p"):
-            ExperimentRunner._matched_repeat_configs(solvers, configs, repeat=0)
+            ExperimentRunner._matched_repeat_configs(problem, solvers, configs, repeat=0)
 
     def test_canonical_bit_order_is_explicit_and_objectively_detectable(self) -> None:
         self.assertEqual(canonical_solution_from_state_index(1, 3), (1, 0, 0))
@@ -71,12 +79,35 @@ class SharedQAOATests(unittest.TestCase):
 
     def test_shared_search_ranks_expectations_but_uses_authoritative_evaluator(self) -> None:
         problem = MaxCutProblem.from_edges(2, [(0, 1)])
-        candidates = ((0.0, 0.0), (math.pi / 2, math.pi / 8))
-        expectation_values = {candidates[0]: 0.5, candidates[1]: 1.0}
+        from variaq.bqm import BinaryQuadraticModel
+
+        bqm = BinaryQuadraticModel(
+            variable_ids=("x_0", "x_1"),
+            linear={"x_0": 0.0, "x_1": 0.0},
+            quadratic={("x_0", "x_1"): -1.0},
+            offset=0.5,
+            sense=problem.sense,
+            source_family="maxcut",
+            source_problem_id=problem.problem_id,
+            penalty_metadata={},
+            decode=({}, {}),
+        )
+        qaoa = QAOAProblem(
+            bqm=bqm,
+            num_variables=2,
+            p=1,
+            candidates=((0.0, 0.0), (math.pi / 2, math.pi / 8)),
+            candidate_digest="",
+            cost_linear=(0.0, 0.0),
+            cost_quadratic=((0, 1, -1.0),),
+            cost_offset=0.5,
+        )
+        expectation_values = {qaoa.candidates[0]: 0.5, qaoa.candidates[1]: 1.0}
 
         outcome = run_shared_parameter_search(
             problem,
-            candidates,
+            qaoa,
+            qaoa.candidates,
             expectation_values.__getitem__,
             lambda parameters, shots: {(1, 0): shots},
             shots=16,

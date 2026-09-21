@@ -244,8 +244,6 @@ class SubsetSelectionProblem(ProblemInstance):
                 if rng.random() < interaction_probability:
                     pair = frozenset({candidates_list[i], candidates_list[j]})
                     interaction[pair] = round(rng.uniform(-10.0, 10.0), 4)
-        if budget is None:
-            budget = sum(cost.values())
         identity = {
             "candidate_ids": sorted(candidate_ids),
             "score": {c: score[c] for c in sorted(candidate_ids)},

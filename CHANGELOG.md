@@ -3,6 +3,51 @@
 VariaQ follows semantic versioning while pre-1.0. Release dates will be added
 when a public release is created.
 
+## 0.5.0 — generic binary quadratic QAOA
+
+- Introduced a backend-neutral `BinaryQuadraticModel` (`variaq.bqm`) as an
+  optional solver artifact, with a documented sense-aware energy convention,
+  validation, canonical pair ordering, and stable SHA-256 digests.
+- Refactored the QAOA layer into a generic `QAOAProblem` built from any BQM;
+  it is agnostic to domain semantics and supplies shared parameter candidates,
+  variable ordering, and cost coefficients to every backend.
+- Rewrote the Qiskit and CUDA-Q CPU/GPU adapters to consume the same BQM,
+  fixing variable-id-to-qubit mapping and Ising-conversion so cross-framework
+  expectations agree to floating-point tolerance.
+- Migrated MaxCut QAOA through the generic BQM path while preserving the
+  established numeric expectation and the 8-node seed-42 reference behavior.
+- Enabled Assignment and Subset Selection on the generic QAOA path where the
+  lowered representation is verified; exact and heuristic baselines remain
+  available for all families. Graph Partition BQM lowering is implemented and
+  tested but is not advertised for quantum solvers in 0.5.0.
+- Centralized penalty construction in `variaq.lower` for constrained families,
+  with deterministic defaults, explicit override support, and persisted penalty
+  metadata in run records.
+- Made decoding and feasibility explicit: every quantum sample is decoded and
+  evaluated by the original problem instance; runs report feasible and infeasible
+  sample counts, best feasible/infeasible energies, and constraint violations.
+- Changed final sample selection to rank decoded feasible solutions by
+  authoritative objective, not raw BQM energy.
+- Added resource guards based on binary variable count and estimated statevector
+  memory before simulator execution.
+- Generalized `variaq compare quantum` to any family whose selected quantum
+  solvers advertise support, preserving matched candidate vectors, ordering,
+  seed, shots, decoder, and evaluator.
+- Updated the capability matrix so `qaoa`, `cudaq-cpu`, and `cudaq-gpu`
+  advertise `maxcut`, `assignment`, and `subset-selection` based on their actual
+  `supported_families` declarations. Graph Partition remains supported only by
+  classical solvers for 0.5.0.
+- Preserved the machine-readable output schema version `1` and problem artifact
+  format version `1`; all new JSON fields are additive.
+- Preserved SQLite database compatibility for records created under VariaQ 0.1–0.4.
+- Added `tests/test_bqm.py` and `tests/test_family_qaoa.py` with independent BQM
+  correctness checks and family-level QAOA end-to-end tests.
+- Updated `README.md`, `ROADMAP.md`, and added `docs/binary-quadratic.md` and
+  `docs/quantum-optimization.md`.
+
+No physical-QPU support is added. No Triagewall, Ollama Fleet, or bb-specific
+scheduling integration is added. No commit, push, tag, or release is performed.
+
 ## 0.4.0 — generic problem families and domain adapters
 
 - Added three domain-neutral problem families: **Assignment**, **Subset

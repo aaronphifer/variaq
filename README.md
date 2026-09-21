@@ -34,7 +34,7 @@ physical QPU.
 
 ## Current capabilities
 
-VariaQ 0.4 supports domain-neutral optimization problem families:
+VariaQ 0.5 supports domain-neutral optimization problem families:
 
 - **MaxCut** — weighted graph partitioning into two sets.
 - **Assignment** — tasks/resources with scores, costs, capacities, demands, and
@@ -44,20 +44,36 @@ VariaQ 0.4 supports domain-neutral optimization problem families:
 - **Graph Partitioning** — k-way weighted graph partitioning with optional size
   balance constraints.
 
+All four families support exact and heuristic classical solvers. Quantum
+solvers consume a shared backend-neutral Binary Quadratic Model (BQM) and
+support:
+
+- **MaxCut**: Qiskit local statevector QAOA, CUDA-Q `qpp-cpu`, and CUDA-Q
+  NVIDIA simulators.
+- **Assignment**, **Subset Selection**: same generic QAOA pipeline; availability
+  depends on the installed quantum backend and the binary-variable budget (see
+  `variaq capabilities --json`).
+- **Graph Partitioning**: BQM lowering is implemented and tested, but quantum
+  support is experimental and not advertised for 0.5.0.
+
 Solvers:
 
 - exact enumeration with configurable state guards,
 - seeded multistart local-search heuristic,
-- Qiskit local statevector QAOA (MaxCut only),
-- CUDA-Q `qpp-cpu` QAOA (MaxCut only),
-- CUDA-Q `nvidia` and `nvidia-fp64` adapters when compatible hardware exists
-  (MaxCut only).
+- Qiskit local statevector QAOA,
+- CUDA-Q `qpp-cpu` QAOA,
+- CUDA-Q `nvidia` and `nvidia-fp64` adapters when compatible hardware exists.
 
 Cross-cutting features:
 
-- solver-independent canonical objective evaluation,
+- solver-independent canonical objective evaluation; the original problem is
+  always authoritative for feasibility, objective, and decoding,
 - objective-sense-aware metrics (maximize/minimize),
-- optional backend-neutral binary quadratic lowering,
+- backend-neutral Binary Quadratic Model lowering with explicit penalty terms,
+- generic QAOA layer shared by Qiskit and CUDA-Q with matched parameter
+  vectors and variable ordering,
+- explicit feasible/infeasible sample handling and constraint violation reporting,
+- statevector memory guards based on binary variable count,
 - append-only SQLite experiment history and rerun lineage,
 - structured failures and capability-aware unavailable outcomes,
 - deterministic reference instance generators,
@@ -224,8 +240,9 @@ authorization, physical-QPU execution must remain impossible.
 
 ## Current limitations
 
-- Quantum solvers are ideal local statevector simulations and support MaxCut
-  only.
+- Quantum solvers are ideal local statevector simulations. Quantum support for
+  non-MaxCut families uses the same generic BQM path but may require larger
+  binary-variable budgets and is not guaranteed to reach the global optimum.
 - CUDA-Q GPU execution has not been physically verified by the project.
 - Peak memory is recorded only when a trustworthy source exists.
 - Public extension APIs may change before 1.0.

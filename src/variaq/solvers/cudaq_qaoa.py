@@ -8,22 +8,22 @@ from importlib import metadata
 from time import perf_counter
 from typing import Any
 
+from variaq.bqm import BinaryQuadraticModel
 from variaq.errors import (
     BackendUnavailableError,
     MissingOptionalDependency,
     SolverLimitError,
     ValidationError,
 )
+from variaq.lower import lower_to_binary_quadratic
 from variaq.models import BackendMetadata, SolverConfig, SolveResult, SolveStatus, utc_now
 from variaq.problems.base import ProblemInstance
-from variaq.problems.maxcut import MaxCutProblem
 from variaq.solvers.base import Solver
 from variaq.solvers.qaoa_shared import (
-    candidate_parameter_digest,
+    build_qaoa_problem,
     canonical_solution_from_cudaq_bitstring,
     common_qaoa_parameters,
     estimate_statevector_bytes,
-    resolve_parameter_candidates,
     run_shared_parameter_search,
 )
 
@@ -89,36 +89,73 @@ def _optional_gpu_metadata() -> dict[str, Any]:
 
 
 class CudaQStatevectorBackend:
-    """CUDA-Q adapter implementing VariaQ's exact QAOA unitary conventions."""
+    """CUDA-Q adapter consuming a VariaQ BQM with canonical variable ordering."""
 
-    def __init__(self, cudaq: Any, problem: MaxCutProblem, p: int, seed: int) -> None:
+    def __init__(self, cudaq: Any, bqm: BinaryQuadraticModel, p: int, seed: int) -> None:
         self.cudaq = cudaq
-        self.problem = problem
+        self.bqm = bqm
         self.p = p
+        self.num_variables = len(bqm.variable_ids)
         self.backend_seed = seed if seed != 0 else 1
         self.kernel, parameters = cudaq.make_kernel(list)
-        qubits = self.kernel.qalloc(problem.variable_count)
+        qubits = self.kernel.qalloc(self.num_variables)
         self.kernel.h(qubits)
+        variable_index = {var_id: index for index, var_id in enumerate(bqm.variable_ids)}
         for layer in range(p):
-            for edge in problem.edges:
+            for (i_var, j_var), coeff in sorted(bqm.quadratic.items()):
+                i = variable_index[i_var]
+                j = variable_index[j_var]
                 # CX-RZ(theta)-CX implements RZZ(theta). Matching Qiskit uses
-                # theta=-gamma*w, hence exp(+i gamma*w*ZZ/2), equivalent to
-                # exp(-i gamma*C) after dropping only a global identity phase.
-                self.kernel.cx(qubits[edge.u], qubits[edge.v])
-                self.kernel.rz(-parameters[layer] * edge.weight, qubits[edge.v])
-                self.kernel.cx(qubits[edge.u], qubits[edge.v])
-            for qubit in range(problem.variable_count):
+                # theta = -gamma * coeff, hence exp(+i gamma * coeff * ZZ / 2).
+                self.kernel.cx(qubits[i], qubits[j])
+                self.kernel.rz(-parameters[layer] * coeff, qubits[j])
+                self.kernel.cx(qubits[i], qubits[j])
+            for var_index, var_id in enumerate(bqm.variable_ids):
+                linear_coeff = bqm.linear.get(var_id, 0.0)
+                if linear_coeff != 0.0:
+                    self.kernel.rz(-parameters[layer] * linear_coeff, qubits[var_index])
+            for qubit in range(self.num_variables):
                 self.kernel.rx(2.0 * parameters[p + layer], qubits[qubit])
 
-        self.objective_constant = sum(edge.weight * 0.5 for edge in problem.edges)
-        if problem.edges:
+        if bqm.quadratic or bqm.linear:
+            variable_index = {var_id: index for index, var_id in enumerate(bqm.variable_ids)}
+            # Convert BQM over {0,1} to Ising over {+1,-1}: x = (1 - z)/2.
+            # E = offset + Σ linear_i x_i + Σ_{i<j} q_ij x_i x_j
+            #   = constant + Σ h_i z_i + Σ_{i<j} J_ij z_i z_j
+            # where:
+            #   J_ij = q_ij / 4
+            #   h_i = -linear_i/2 - Σ_{j≠i} q_{min(i,j),max(i,j)} / 4
+            #   constant = offset + Σ linear_i/2 + Σ_{i<j} q_ij/4
+            constant = bqm.offset
+            linear_ising: dict[str, float] = {
+                var_id: -0.5 * coeff for var_id, coeff in bqm.linear.items()
+            }
+            quadratic_ising: dict[tuple[str, str], float] = {
+                pair: 0.25 * coeff for pair, coeff in bqm.quadratic.items()
+            }
+            for (i_var, j_var), coeff in bqm.quadratic.items():
+                constant += 0.25 * coeff
+                linear_ising[i_var] -= 0.25 * coeff
+                linear_ising[j_var] -= 0.25 * coeff
+            for _var_id, coeff in bqm.linear.items():
+                constant += 0.5 * coeff
+
             hamiltonian = None
-            for edge in problem.edges:
-                term = -0.5 * edge.weight * cudaq.spin.z(edge.u) * cudaq.spin.z(edge.v)
+            for (i_var, j_var), coeff in quadratic_ising.items():
+                i = variable_index[i_var]
+                j = variable_index[j_var]
+                term = coeff * cudaq.spin.z(i) * cudaq.spin.z(j)
                 hamiltonian = term if hamiltonian is None else hamiltonian + term
-            self.hamiltonian = hamiltonian
+            for var_id, coeff in linear_ising.items():
+                if coeff != 0.0:
+                    index = variable_index[var_id]
+                    term = coeff * cudaq.spin.z(index)
+                    hamiltonian = term if hamiltonian is None else hamiltonian + term
+            self.hamiltonian = hamiltonian if hamiltonian is not None else 0.0 * cudaq.spin.z(0)
+            self.objective_constant = constant
         else:
             self.hamiltonian = 0.0 * cudaq.spin.z(0)
+            self.objective_constant = bqm.offset
 
     def expectation(self, parameters: tuple[float, ...]) -> float:
         result = self.cudaq.observe(self.kernel, self.hamiltonian, list(parameters))
@@ -129,25 +166,25 @@ class CudaQStatevectorBackend:
         result = self.cudaq.sample(self.kernel, list(parameters), shots_count=shots)
         counts: dict[tuple[int, ...], int] = {}
         for bitstring, count in result.items():
-            solution = canonical_solution_from_cudaq_bitstring(
-                str(bitstring), self.problem.variable_count
-            )
+            solution = canonical_solution_from_cudaq_bitstring(str(bitstring), self.num_variables)
             counts[solution] = counts.get(solution, 0) + int(count)
         return counts
 
     def logical_operation_counts(self) -> dict[str, int]:
         return {
-            "h": self.problem.variable_count,
-            "cx": 2 * len(self.problem.edges) * self.p,
-            "rz": len(self.problem.edges) * self.p,
-            "rx": self.problem.variable_count * self.p,
+            "h": self.num_variables,
+            "cx": 2 * len(self.bqm.quadratic) * self.p,
+            "rz": (len(self.bqm.quadratic) + sum(1 for v in self.bqm.linear.values() if v != 0.0))
+            * self.p,
+            "rx": self.num_variables * self.p,
         }
 
 
 class _CudaQQAOASolver(Solver):
-    version = "1"
-    supported_families = frozenset({"maxcut"})
-    max_variables = 16
+    version = "2"
+    supported_families = frozenset({"maxcut", "assignment", "subset-selection"})
+    max_variables = 18
+    max_statevector_bytes = 2 * 1024**3
     target_kind: str
 
     def _precision_and_target(self, parameters: dict[str, Any]) -> tuple[str, str]:
@@ -163,8 +200,7 @@ class _CudaQQAOASolver(Solver):
         return precision, "nvidia" if precision == "fp32" else "nvidia-fp64"
 
     def solve(self, problem: ProblemInstance, config: SolverConfig) -> SolveResult:
-        if not isinstance(problem, MaxCutProblem):
-            raise ValidationError("The CUDA-Q QAOA solvers support MaxCut only")
+        self.check_family(problem)
         self.validate_parameters(
             config.parameters,
             {
@@ -177,15 +213,22 @@ class _CudaQQAOASolver(Solver):
                 "max_statevector_bytes",
             },
         )
-        if problem.variable_count > self.max_variables:
+
+        bqm = lower_to_binary_quadratic(problem)
+        if len(bqm.variable_ids) > self.max_variables:
             raise SolverLimitError(
                 f"CUDA-Q statevector QAOA is limited to {self.max_variables} variables"
             )
+
         precision, target_name = self._precision_and_target(config.parameters)
-        estimated_bytes = estimate_statevector_bytes(problem.variable_count, precision)
-        memory_guard = int(config.parameters.get("max_statevector_bytes", 2 * 1024**3))
+        estimated_bytes = estimate_statevector_bytes(len(bqm.variable_ids), precision)
+        memory_guard = int(
+            config.parameters.get("max_statevector_bytes", self.max_statevector_bytes)
+        )
         if memory_guard < 1:
             raise ValidationError("max_statevector_bytes must be positive")
+        if memory_guard > self.max_statevector_bytes:
+            memory_guard = self.max_statevector_bytes
         if estimated_bytes > memory_guard:
             raise SolverLimitError(
                 f"Estimated statevector size {estimated_bytes} bytes exceeds configured "
@@ -193,6 +236,8 @@ class _CudaQQAOASolver(Solver):
             )
 
         p, optimizer_trials, shots, warmup = common_qaoa_parameters(config.parameters)
+        qaoa = build_qaoa_problem(problem, bqm, config.parameters, config.seed)
+
         solver_started = perf_counter()
         initialization_started = perf_counter()
         cudaq = _load_cudaq()
@@ -218,16 +263,13 @@ class _CudaQQAOASolver(Solver):
                     provider="cudaq",
                 )
 
-        candidates = resolve_parameter_candidates(
-            config.parameters, p, optimizer_trials, config.seed
-        )
-
         with _selected_target(cudaq, target_name):
-            backend = CudaQStatevectorBackend(cudaq, problem, p, config.seed)
+            backend = CudaQStatevectorBackend(cudaq, bqm, p, config.seed)
             initialization_seconds = perf_counter() - initialization_started
             outcome = run_shared_parameter_search(
                 problem,
-                candidates,
+                qaoa,
+                qaoa.candidates,
                 backend.expectation,
                 backend.sample,
                 shots=shots,
@@ -244,7 +286,7 @@ class _CudaQQAOASolver(Solver):
             "warmup": warmup,
             "precision": precision,
             "parameter_order": "gammas_then_betas",
-            "candidate_parameters": [list(candidate) for candidate in candidates],
+            "candidate_parameters": [list(candidate) for candidate in qaoa.candidates],
         }
         execution_seconds = (
             outcome.warmup_seconds
@@ -261,11 +303,12 @@ class _CudaQQAOASolver(Solver):
             "optimizer": "seeded-random-search",
             "optimizer_trials": optimizer_trials,
             "shots": shots,
-            "qubit_count": problem.variable_count,
+            "qubit_count": qaoa.num_variables,
+            "binary_variable_count": qaoa.num_variables,
             "estimated_statevector_bytes": estimated_bytes,
             "statevector_memory_guard_bytes": memory_guard,
             "parameter_order": "gammas_then_betas",
-            "candidate_parameter_digest": candidate_parameter_digest(candidates),
+            "candidate_parameter_digest": qaoa.candidate_digest,
             "candidate_expectations": list(outcome.candidate_expectations),
             "best_parameter_index": outcome.best_parameter_index,
             "best_parameters": list(outcome.best_parameters),
@@ -273,6 +316,10 @@ class _CudaQQAOASolver(Solver):
             "sampled_unique_states": len(outcome.sample_counts),
             "logical_operation_counts": operation_counts,
             "logical_gate_count": sum(operation_counts.values()),
+            "feasible_sample_count": outcome.feasible_sample_count,
+            "infeasible_sample_count": outcome.infeasible_sample_count,
+            "best_solution_energy": outcome.best_solution_energy,
+            "best_infeasible_energy": outcome.best_infeasible_energy,
             "backend_initialization_seconds": initialization_seconds,
             "warmup_seconds": outcome.warmup_seconds,
             "parameter_search_seconds": outcome.parameter_search_seconds,
@@ -283,6 +330,11 @@ class _CudaQQAOASolver(Solver):
         }
         if self.target_kind == "gpu":
             metrics.update(_optional_gpu_metadata())
+
+        status = SolveStatus.SUCCESS if outcome.evaluation.feasible else SolveStatus.FAILED
+        if outcome.feasible_sample_count == 0:
+            status = SolveStatus.FAILED
+
         notes = [
             "Local ideal CUDA-Q simulation using cudaq.observe for expectations and "
             "cudaq.sample for final samples; no QPU execution.",
@@ -290,14 +342,15 @@ class _CudaQQAOASolver(Solver):
         ]
         if config.seed == 0:
             notes.append("CUDA-Q treats seed 0 as unseeded; VariaQ maps it to backend seed 1.")
+
         return SolveResult(
             solver_name=self.name,
             solver_version=self.version,
             problem_id=problem.problem_id,
             problem_type=problem.problem_type,
             variable_count=problem.variable_count,
-            solution=outcome.best_solution,
-            objective=outcome.evaluation.objective,
+            solution=outcome.best_solution if status is SolveStatus.SUCCESS else None,
+            objective=outcome.evaluation.objective if status is SolveStatus.SUCCESS else None,
             feasible=outcome.evaluation.feasible,
             constraint_violations=outcome.evaluation.constraint_violations,
             wall_time_seconds=elapsed,
@@ -314,7 +367,7 @@ class _CudaQQAOASolver(Solver):
             seed=config.seed,
             parameters=parameters_used,
             timestamp=utc_now(),
-            status=SolveStatus.SUCCESS,
+            status=status,
         )
 
 
