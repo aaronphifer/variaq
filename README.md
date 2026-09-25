@@ -108,8 +108,7 @@ Domain-specific projects connect through small external **adapters**; see
 
 ## Installation
 
-VariaQ is not published to PyPI. After the public repository exists, replace
-`aaronphifer` below with the GitHub owner:
+VariaQ is not published to PyPI. Clone the public repository:
 
 ```bash
 git clone https://github.com/aaronphifer/variaq.git
