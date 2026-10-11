@@ -1,6 +1,6 @@
 # Scientific benchmarking in the local web UI
 
-This is the unreleased `0.8.0rc1` candidate;
+This is the `0.8.0` release;
 CLI, API, campaign, report, and SQLite versions remain compatible with schema 1.
 Start the existing loopback web service with the web extra installed:
 

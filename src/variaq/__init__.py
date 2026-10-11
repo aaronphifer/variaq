@@ -1,6 +1,6 @@
 """VariaQ: reproducible optimization experiment comparisons."""
 
-__version__ = "0.8.0rc1"
+__version__ = "0.8.0"
 
 from variaq import adapter, lower, models
 from variaq.problems import (

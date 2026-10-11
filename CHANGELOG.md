@@ -3,7 +3,7 @@
 VariaQ follows semantic versioning while pre-1.0. Release dates will be added
 when a public release is created.
 
-## 0.8.0rc1 — local release candidate (unreleased)
+## 0.8.0 — stable release (unreleased)
 
 - Added controlled scientific campaign matrices, authoritative per-instance quality,
   conservative paired-solver measurements, variability, null reasons and expanded exports.

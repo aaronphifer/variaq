@@ -83,9 +83,9 @@ These are directions, not implemented features or delivery commitments.
 - analysis-visualization charts driven by structured `AnalysisResult` data;
 - safe report downloads confined to known report artifacts.
 
-## v0.8 — reproducible scientific benchmarking (local candidate)
+## v0.8 — reproducible scientific benchmarking (0.8.0)
 
-First development slice (implemented in this checkout, not a release):
+Shipped development slice:
 
 - small opt-in MaxCut matrices over sizes, graph seeds, solver repeats, and local
   classical/Qiskit/CUDA-Q backends with existing resource guards;
@@ -97,7 +97,7 @@ First development slice (implemented in this checkout, not a release):
 - additive schema-v1 JSON, CSV, and Markdown reporting, documented methodology,
   and dependency-free regression coverage.
 
-Web interface development slice (implemented in the candidate):
+Web interface development slice:
 
 - cohesive dark-first responsive dashboard and navigation;
 - guided experiment recipes, capability-aware solver selection, advanced QAOA
@@ -113,7 +113,7 @@ Durable SQLite task snapshots and recovery of interrupted web tasks are implemen
 Duplicate web submissions reconnect to the original task, and campaign attempts are
 saved before the next solver call. CLI reruns remain explicit new executions.
 See [web benchmarking workflow](docs/benchmarking-ui.md) and
-[candidate hardening](docs/releases/v0.8.0-hardening.md). Hard native-call cancellation
+[hardening notes](docs/releases/v0.8.0-hardening.md). Hard native-call cancellation
 remains deferred.
 
 Fresh-process GPU cold-start verification, trustworthy peak memory telemetry,
