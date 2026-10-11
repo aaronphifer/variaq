@@ -236,6 +236,7 @@ class AnalysisResult:
     comparisons: tuple[ComparisonSummary, ...]
     warnings: tuple[str, ...]
     source_run_ids: tuple[str, ...]
+    instances: tuple[dict[str, Any], ...] = ()
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -245,4 +246,5 @@ class AnalysisResult:
             "comparisons": [c.to_dict() for c in self.comparisons],
             "warnings": list(self.warnings),
             "source_run_ids": list(self.source_run_ids),
+            "instances": list(self.instances),
         }

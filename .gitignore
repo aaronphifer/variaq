@@ -31,6 +31,7 @@ data/artifacts/*
 # Legacy/root-level runtime paths used by older local invocations.
 /variaq.db
 /variaq.db-*
+*.web-worker.lock
 /problems/
 
 # Local credentials and environment files

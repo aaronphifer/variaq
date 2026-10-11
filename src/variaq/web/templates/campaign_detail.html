@@ -3,7 +3,7 @@
 {% block content %}
 <section class="page-head">
   <h1 class="mono-wrap">Campaign <code>{{ campaign_id }}</code></h1>
-</section>
+<div class="actions"><a class="button primary" href="/compare?campaign={{ campaign_id }}">Compare results</a></div></section>
 <p id="campaign-status" class="notice muted" role="status">Loading…</p>
 <div id="campaign-detail" hidden>
   <section class="panel" aria-labelledby="campaign-def-h">

@@ -12,8 +12,10 @@ registered to a known report artifact inside the configured reports root.
 from __future__ import annotations
 
 import logging
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse
@@ -27,7 +29,9 @@ from variaq.web.schemas import (
     AnalysisRequest,
     CampaignPlanRequest,
     CampaignRunRequest,
+    ComparisonRequest,
     ReportRequest,
+    ReproductionRequest,
 )
 from variaq.web.tasks import CampaignTaskManager
 
@@ -44,16 +48,73 @@ def create_app(
     service: VariaQService,
     *,
     task_manager: CampaignTaskManager | None = None,
+    trusted_hosts: tuple[str, ...] = ("127.0.0.1", "localhost", "::1", "testserver"),
 ) -> FastAPI:
+    tasks = task_manager or CampaignTaskManager()
+    tasks.bind(service)
+
+    @asynccontextmanager
+    async def lifespan(_app: FastAPI):
+        yield
+        tasks.close()
+
     app = FastAPI(
         title="VariaQ",
         version="1",
         docs_url=None,
         redoc_url=None,
         openapi_url=None,
+        lifespan=lifespan,
     )
     app.state.service = service
-    tasks = task_manager or CampaignTaskManager()
+
+    @app.middleware("http")
+    async def same_origin_writes(request: Request, call_next: Any) -> Any:
+        if "*" not in trusted_hosts:
+            host = request.headers.get("host", "")
+            try:
+                parsed_host = urlsplit("//" + host)
+                valid_host = (
+                    parsed_host.hostname in trusted_hosts
+                    and parsed_host.username is None
+                    and not any(c in host for c in "/\\?# \t\r\n")
+                )
+                _ = parsed_host.port  # Reject malformed port syntax as well.
+            except ValueError:
+                valid_host = False
+            if not valid_host:
+                return JSONResponse(
+                    status_code=400,
+                    content={
+                        "error": {"type": "InvalidHost", "message": "Untrusted local Host header"}
+                    },
+                )
+        if request.method not in {"GET", "HEAD", "OPTIONS"}:
+            origin = request.headers.get("origin")
+            try:
+                parsed = urlsplit(origin) if origin else None
+            except ValueError:
+                return JSONResponse(
+                    status_code=403,
+                    content={
+                        "error": {"type": "CrossOriginWrite", "message": "Malformed Origin header"}
+                    },
+                )
+            if request.headers.get("sec-fetch-site") == "cross-site" or (
+                parsed is not None
+                and (parsed.scheme != request.url.scheme or parsed.netloc != request.url.netloc)
+            ):
+                return JSONResponse(
+                    status_code=403,
+                    content={
+                        "error": {
+                            "type": "CrossOriginWrite",
+                            "message": "Cross-origin execution is refused",
+                        }
+                    },
+                )
+        return await call_next(request)
+
     app.state.tasks = tasks
 
     templates = Jinja2Templates(directory=str(TEMPLATE_DIR))
@@ -186,6 +247,23 @@ def create_app(
     def api_run(run_id: str) -> dict[str, Any]:
         return svc().get_run(run_id)
 
+    @app.post(f"{API_PREFIX}/runs/{{run_id}}/reproduce")
+    def api_reproduce(
+        run_id: str, payload: ReproductionRequest, request: Request
+    ) -> dict[str, Any]:
+        task = request.app.state.tasks.start_reproduction(svc(), run_id)
+        if task is None:
+            raise HTTPException(status_code=409, detail="A local experiment is already running")
+        return {"task": task.to_dict()}
+
+    @app.post(f"{API_PREFIX}/comparison")
+    def api_comparison(payload: ComparisonRequest) -> dict[str, Any]:
+        return svc().compare(payload.model_dump(exclude_none=True))
+
+    @app.post(f"{API_PREFIX}/comparison/reports")
+    def api_comparison_report(payload: ComparisonRequest) -> dict[str, Any]:
+        return svc().compare(payload.model_dump(exclude_none=True), export=True)
+
     # -- API: campaigns ------------------------------------------------------------
 
     @app.get(f"{API_PREFIX}/campaigns")
@@ -208,8 +286,8 @@ def create_app(
         return {"task": task.to_dict()}
 
     @app.get(f"{API_PREFIX}/campaigns/{{campaign_id}}")
-    def api_campaign(campaign_id: str) -> dict[str, Any]:
-        return svc().get_campaign(campaign_id)
+    def api_campaign(campaign_id: str, limit: int | None = None, offset: int = 0) -> dict[str, Any]:
+        return svc().get_campaign(campaign_id, limit=limit, offset=offset)
 
     @app.post(f"{API_PREFIX}/campaigns/plan")
     def api_campaign_plan(payload: CampaignPlanRequest) -> dict[str, Any]:
@@ -302,6 +380,10 @@ def create_app(
     @app.get("/", include_in_schema=False)
     def dashboard(request: Request) -> Any:
         return page(request, "dashboard.html")
+
+    @app.get("/compare", include_in_schema=False)
+    def comparison(request: Request) -> Any:
+        return page(request, "comparison.html")
 
     @app.get("/problems", include_in_schema=False)
     def problems(request: Request) -> Any:

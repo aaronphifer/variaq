@@ -13,7 +13,6 @@ from variaq.campaigns.store import CampaignStore
 from variaq.errors import ValidationError
 from variaq.experiments.runner import ExperimentRunner
 from variaq.experiments.storage import ExperimentStore
-from variaq.models import SolverConfig
 from variaq.solvers.base import Solver
 from variaq.solvers.exact import ExactSolver
 
@@ -190,28 +189,12 @@ class CampaignRunnerTests(unittest.TestCase):
                 repeats=2,
             )
             cr = CampaignRunner(runner, camp_store, problems_dir, max_runs=1000)
-            # Monkey-patch runner to simulate a single solver failure on repeat.
-            original_benchmark = runner.benchmark
+            from unittest.mock import patch
 
-            def failing_benchmark(problem, solvers, configs, repeats=1):
-                runs = original_benchmark(problem, solvers, configs, repeats=repeats)
-                # Force the second run to fail by re-running with a failing solver.
-                failing = type(
-                    "F",
-                    (Solver,),
-                    {
-                        "name": "failing-injected",
-                        "version": "test",
-                        "supported_families": frozenset({"maxcut"}),
-                        "solve": lambda self, p, c: (_ for _ in ()).throw(RuntimeError("injected")),
-                    },
-                )()
-                return runs[:1] + [
-                    runner._execute(problem, failing, configs.get("exact", SolverConfig()), None)
-                ]
-
-            runner.benchmark = failing_benchmark
-            summary = cr.run(campaign)
+            SometimesFailingSolver.name = "exact"
+            with patch("variaq.campaigns.runner.get_solver", return_value=SometimesFailingSolver()):
+                summary = cr.run(campaign)
+            self.assertEqual(exp_store.count(), 2)
             self.assertGreaterEqual(summary["status_summary"].get("success", 0), 1)
             self.assertGreaterEqual(summary["status_summary"].get("failed", 0), 1)
 

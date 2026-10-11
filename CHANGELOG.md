@@ -3,6 +3,22 @@
 VariaQ follows semantic versioning while pre-1.0. Release dates will be added
 when a public release is created.
 
+## 0.8.0 — stable release (unreleased)
+
+- Added controlled scientific campaign matrices, authoritative per-instance quality,
+  conservative paired-solver measurements, variability, null reasons and expanded exports.
+- Added the responsive comparison workspace, reviewed experiment setup and local reproduction.
+- Persisted web task status in additive SQLite tables with an OS-held single worker lock.
+  Interrupted work retains completed attempts; duplicate web requests reconnect without retries.
+  Campaign attempts now persist before the next solver call, with recoverable membership provenance.
+- Removed solver execution from capability discovery; reads no longer select CUDA-Q targets.
+- Added first-backend-call timing with explicit overlap and lazy-initialization scope.
+  Cold GPU state remains unverified, and native calls cannot be safely cancelled.
+- Fixed canonical stored exact references, ambiguous duplicate campaign slots,
+  bounded web configuration, report symlink writes and cross-origin/forged-host requests.
+- Preserved experiment, campaign, report, CLI and API schema version 1 and existing history.
+- See [hardening and upgrade notes](docs/releases/v0.8.0-hardening.md).
+
 ## 0.7.0 — local web UI
 
 - Added an optional, local-first web interface (`pip install 'variaq[web]'`,

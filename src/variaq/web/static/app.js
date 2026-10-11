@@ -25,7 +25,8 @@ async function handle(res) {
     const detail = payload && payload.error ? payload.error
       : payload && payload.detail ? (typeof payload.detail === "string" ? { message: payload.detail } : payload.detail)
       : { type: "HttpError", message: "Request failed with status " + res.status };
-    const err = new Error(detail.message || "request failed");
+    const message = Array.isArray(detail) ? detail.map(d => `${(d.loc || []).filter(x=>x!=="body").join(" → ")}: ${d.msg}`).join("; ") : detail.message;
+    const err = new Error(message || "Request failed. Check your selection and try again.");
     err.type = detail.type || "HttpError";
     err.details = detail.details || null;
     throw err;
@@ -117,13 +118,14 @@ async function initDashboard() {
       <td>${esc(r.solver_name)}</td><td>${statusPill(r.status)}</td>
       <td>${fmtNum(r.objective)}</td><td>${fmtNum(r.wall_time_seconds, 4)}</td></tr>`), 5, "No runs yet.");
 
+    if (el("stat-completed")) el("stat-completed").textContent = data.fully_recorded_campaigns ?? "—";
     el("recent-campaigns-list").innerHTML = data.recent_campaigns.length
-      ? data.recent_campaigns.map(c => `<li><a href="/campaigns/${esc(c.campaign_id)}"><code>${esc(shortId(c.campaign_id))}</code></a> ${esc(c.name)} <span class="muted">(${esc(c.family)})</span></li>`).join("")
+      ? data.recent_campaigns.map(c => `<li><a href="/campaigns/${esc(c.campaign_id)}"><code>${esc(shortId(c.campaign_id))}</code></a> ${esc(c.name)} <span class="muted">${esc(c.family)} · ${c.completed_runs ?? "—"} recorded / ${c.requested_runs ?? "—"} requested</span> <a href="/compare?campaign=${encodeURIComponent(c.campaign_id)}">Compare →</a></li>`).join("")
       : `<li class="muted">No campaigns yet.</li>`;
 
     const solvers = Object.entries(data.solver_availability);
     tableRows("solver-state-table", solvers.map(([name, s]) =>
-      `<tr><td>${esc(name)}</td><td>${boolText(s.installed)}</td><td>${boolText(s.available)}</td></tr>`), 3, "No solvers.");
+      `<tr><td>${esc(name)}<small class="form-help"> · ${name==='exact'||name==='heuristic'?'CPU classical':name==='cudaq-gpu'?'GPU local quantum simulator':'CPU local quantum simulator'}</small></td><td>${boolText(s.installed)}</td><td>${boolText(s.available)}</td></tr>`), 3, "No solvers.");
     const c = data.cudaq || {};
     const targets = c.targets || {};
     kvFill(el("backend-facts"), [
@@ -249,6 +251,49 @@ async function initRunDetail() {
     el("run-status").hidden = true;
     el("run-detail").hidden = false;
     const r = run.result, m = r.backend.metrics || {};
+    el("run-configuration").textContent = JSON.stringify(run.solver_config, null, 2);
+    el("run-environment").textContent = JSON.stringify(run.environment, null, 2);
+    el("run-canonical").textContent = JSON.stringify(run.problem, null, 2);
+    kvFill(el("run-scope-kv"), [
+      ["Complete-call wall scope", m.wall_time_scope || "Unknown in historical metadata"],
+      ["Compute scope", m.solver_time_scope || "Unknown in historical metadata"],
+      ["Requested precision", run.solver_config.parameters.precision || "Not requested"],
+      ["Cold-start verified", boolText(run.environment.benchmark_protocol?.cold_start_verified)],
+      ["Cold-start reason", run.environment.benchmark_protocol?.cold_start_reason || "No process/device isolation recorded"],
+    ]);
+    // Use the authoritative Python layer, with explicit local reference selection.
+    const evidence = await apiGet(`/runs?problem_id=${encodeURIComponent(run.problem.problem_id)}&limit=500`);
+    const ids = [...new Set([id,...evidence.runs.map(x=>x.run_id)])].slice(0,500);
+    const measured = await apiPost('/comparison',{run_ids:ids,limit:500});
+    const instance = measured.analysis.instances.find(i=>i.problem_id===run.problem.problem_id);
+    const measurement = instance?.runs.find(r=>r.run_id===id);
+    if(measurement) {
+      kvFill(el("run-authoritative-kv"),[
+        ["Authoritative decoded objective", fmtNum(measurement.objective)],
+        ["Authoritative feasibility", boolText(measurement.feasible)],
+        ["Reported objective agrees", boolText(measurement.objective_matches_reported)],
+        ["Selected exact reference", fmtNum(measurement.reference_optimum)],
+        ["Gap to selected exact reference (%)", fmtNum(measurement.optimality_gap_percent)],
+        ["Reference evidence", `${ids.length} selected problem runs (bounded at 500); exact sources: ${instance.reference_run_ids.join(', ') || 'none'}`],
+      ]);
+      el("run-missing").textContent=JSON.stringify(measurement.missing_measurements,null,2);
+    }
+    const reproduce = el("reproduce-run");
+    reproduce.disabled = !run.reproduction_eligible;
+    reproduce.addEventListener("click",async()=>{
+      reproduce.disabled=true; setStatus("reproduce-status","Starting a new local run with the saved configuration…");
+      try {
+        const data=await apiPost(`/runs/${encodeURIComponent(id)}/reproduce`,{});
+        async function poll() {
+          try { const {task}=await apiGet('/campaigns/tasks/'+encodeURIComponent(data.task.task_id));
+            if(task.status==='completed') { el("reproduce-status").innerHTML=`<a href="/runs/${encodeURIComponent(task.result.run_id)}">Open reproduced experiment →</a>`;reproduce.disabled=false; }
+            else if(['failed','interrupted'].includes(task.status)){setStatus('reproduce-status',task.error?.message || 'Reproduction failed',true);reproduce.disabled=false;}
+            else {setStatus('reproduce-status','Reproducing locally…');setTimeout(poll,1500);}
+          } catch(e){setStatus('reproduce-status','Task status unavailable. Check Runs for persisted results before retrying.',true);reproduce.disabled=false;}
+        }
+        poll();
+      }catch(e){setStatus('reproduce-status',e.message,true);reproduce.disabled=false;}
+    });
     const messages = el("run-messages");
     const warnings = (r.warnings || []).slice(0, 10);
     const errors = (r.errors || []).slice(0, 10);

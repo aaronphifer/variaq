@@ -1,0 +1,73 @@
+{
+  "campaign_format_version": "1",
+  "name": "maxcut-v0.8-warmed",
+  "family": "maxcut",
+  "problem_sizes": [
+    4,
+    6,
+    8
+  ],
+  "problem_seeds": [
+    11,
+    42
+  ],
+  "solvers": [
+    "exact",
+    "heuristic",
+    "qaoa",
+    "cudaq-cpu",
+    "cudaq-gpu"
+  ],
+  "repeats": 3,
+  "base_seed": 42,
+  "solver_config": {
+    "exact": {
+      "parameters": {
+        "max_states": 256
+      }
+    },
+    "heuristic": {
+      "parameters": {
+        "restarts": 4,
+        "max_passes": 16
+      }
+    },
+    "qaoa": {
+      "parameters": {
+        "p": 1,
+        "optimizer_trials": 8,
+        "shots": 128,
+        "warmup": true
+      }
+    },
+    "cudaq-cpu": {
+      "parameters": {
+        "p": 1,
+        "optimizer_trials": 8,
+        "shots": 128,
+        "warmup": true,
+        "precision": "fp64",
+        "max_statevector_bytes": 1048576
+      }
+    },
+    "cudaq-gpu": {
+      "parameters": {
+        "p": 1,
+        "optimizer_trials": 8,
+        "shots": 128,
+        "warmup": true,
+        "precision": "fp64",
+        "max_statevector_bytes": 1048576
+      }
+    }
+  },
+  "generator_parameters": {
+    "edge_probability": 0.4
+  },
+  "tags": [
+    "scientific-benchmark",
+    "v0.8",
+    "warmed"
+  ],
+  "notes": "Opt-in bounded simulator benchmark. No quantum advantage claim. Unwarmed does not prove fresh GPU state."
+}

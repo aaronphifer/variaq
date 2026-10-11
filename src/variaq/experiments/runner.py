@@ -1,11 +1,16 @@
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from dataclasses import replace
 from time import perf_counter
 from uuid import uuid4
 
-from variaq.errors import BackendUnavailableError, UnsafeBackendError, ValidationError
+from variaq.errors import (
+    BackendUnavailableError,
+    MissingOptionalDependency,
+    UnsafeBackendError,
+    ValidationError,
+)
 from variaq.experiments.storage import ExperimentStore
 from variaq.models import (
     BackendMetadata,
@@ -32,6 +37,7 @@ from variaq.solvers.qaoa_shared import (
 class ExperimentRunner:
     def __init__(self, store: ExperimentStore) -> None:
         self.store = store
+        self._solver_invocations: dict[str, int] = {}
 
     def _execute(
         self,
@@ -40,15 +46,16 @@ class ExperimentRunner:
         config: SolverConfig,
         benchmark_id: str | None,
         rerun_of: str | None = None,
+        repeat_index: int | None = None,
     ) -> ExperimentRun:
         started = perf_counter()
         try:
             result = solver.solve(problem, config)
             if not result.backend.is_local:
                 raise UnsafeBackendError(
-                    "VariaQ v0.2 refuses non-local backends; no QPU execution is supported"
+                    "VariaQ refuses non-local backends; no QPU execution is supported"
                 )
-        except BackendUnavailableError as exc:
+        except (BackendUnavailableError, MissingOptionalDependency) as exc:
             elapsed = perf_counter() - started
             result = SolveResult(
                 solver_name=getattr(solver, "name", type(solver).__name__),
@@ -64,8 +71,8 @@ class ExperimentRunner:
                 solver_time_seconds=None,
                 backend=BackendMetadata(
                     backend_type="unavailable",
-                    name=exc.backend_name,
-                    provider=exc.provider,
+                    name=getattr(exc, "backend_name", solver.name),
+                    provider=getattr(exc, "provider", "variaq"),
                     is_local=True,
                     metrics={"capability_available": False, "reason": str(exc)},
                 ),
@@ -101,6 +108,34 @@ class ExperimentRunner:
                 status=SolveStatus.FAILED,
                 errors=(f"{type(exc).__name__}: {exc}",),
             )
+        # Measure the complete solver call, including validation/lowering/imports.
+        # Persistence and environment capture are outside this wall-time scope.
+        elapsed = perf_counter() - started
+        metrics = dict(result.backend.metrics)
+        metrics.update(
+            wall_time_scope="solver_call_including_setup_excluding_persistence",
+            solver_time_scope=(
+                "warmup_expectations_and_sampling"
+                if solver.name in QAOA_SOLVER_NAMES
+                else "solver_reported_compute"
+            ),
+        )
+        result = replace(
+            result,
+            wall_time_seconds=elapsed,
+            backend=replace(result.backend, metrics=metrics),
+        )
+        invocation = self._solver_invocations.get(solver.name, 0)
+        self._solver_invocations[solver.name] = invocation + 1
+        environment = capture_environment()
+        environment["benchmark_protocol"] = {
+            "repeat_index": repeat_index,
+            "solver_invocation_index": invocation,
+            "warmup_requested": config.parameters.get("warmup", False),
+            "process_isolated": False,
+            "cold_start_verified": None,
+            "cold_start_reason": "Runner reuse does not establish fresh backend/device state",
+        }
         return ExperimentRun(
             run_id=new_run_id(),
             benchmark_id=benchmark_id,
@@ -108,7 +143,7 @@ class ExperimentRunner:
             problem=problem.to_dict(),
             solver_config=config,
             result=result,
-            environment=capture_environment(),
+            environment=environment,
             rerun_of=rerun_of,
         )
 
@@ -132,12 +167,20 @@ class ExperimentRunner:
             )
         if problem.sense is OptimizationSense.MAXIMIZE:
             delta = best_known - result.objective
-            gap = max(0.0, delta / abs(best_known) * 100.0) if best_known != 0 else 0.0
+            gap = (
+                max(0.0, delta / abs(best_known) * 100.0)
+                if best_known != 0
+                else (0.0 if delta == 0 else None)
+            )
             ratio = result.objective / best_known if best_known > 0 else None
             normalized = ratio
         else:
             delta = result.objective - best_known
-            gap = max(0.0, delta / abs(best_known) * 100.0) if best_known != 0 else 0.0
+            gap = (
+                max(0.0, delta / abs(best_known) * 100.0)
+                if best_known != 0
+                else (0.0 if delta == 0 else None)
+            )
             ratio = best_known / result.objective if result.objective > 0 else None
             normalized = ratio
         return replace(
@@ -146,7 +189,9 @@ class ExperimentRunner:
                 result,
                 best_known_objective=best_known,
                 best_known_source=source,
-                optimality_gap_percent=gap,
+                optimality_gap_percent=gap
+                if source in {"exact_optimum", "stored_exact_optimum"}
+                else None,
                 approximation_ratio=ratio,
                 normalized_score=normalized,
             ),
@@ -159,8 +204,11 @@ class ExperimentRunner:
         config: SolverConfig,
         *,
         rerun_of: str | None = None,
+        web_task_id: str | None = None,
     ) -> ExperimentRun:
         run = self._execute(problem, solver, config, None, rerun_of)
+        if web_task_id is not None:
+            run = replace(run, environment={**run.environment, "web_task_id": web_task_id})
         if run.result.status is SolveStatus.SUCCESS and solver.name == "exact":
             best_known = run.result.objective
             source = "exact_optimum"
@@ -177,6 +225,11 @@ class ExperimentRunner:
         solvers: Iterable[Solver],
         configs: dict[str, SolverConfig],
         repeats: int = 1,
+        *,
+        on_persisted: Callable[[ExperimentRun], None] | None = None,
+        campaign_id: str | None = None,
+        web_task_id: str | None = None,
+        should_abort: Callable[[], bool] | None = None,
     ) -> list[ExperimentRun]:
         if repeats < 1:
             raise ValueError("repeats must be positive")
@@ -190,7 +243,31 @@ class ExperimentRunner:
         for solver in solver_list:
             for repeat in range(repeats):
                 repeat_config = repeat_configs[repeat][solver.name]
-                pending.append(self._execute(problem, solver, repeat_config, benchmark_id))
+                if should_abort is not None and should_abort():
+                    return pending
+                run = self._execute(
+                    problem, solver, repeat_config, benchmark_id, repeat_index=repeat
+                )
+                if on_persisted is not None:
+                    # Campaigns persist each completed attempt before starting another.
+                    # Later exact references are derived by analysis, never by rewriting history.
+                    exact = self.store.exact_objective(problem.problem_id)
+                    source = "stored_exact_optimum" if exact is not None else None
+                    if solver.name == "exact" and run.result.feasible:
+                        exact, source = run.result.objective, "exact_optimum"
+                    run = self._add_comparison(run, problem, exact, source)
+                    environment = {
+                        **run.environment,
+                        "campaign_id": campaign_id,
+                        "web_task_id": web_task_id,
+                    }
+                    run = replace(run, environment=environment)
+                    self.store.save(run)
+                    on_persisted(run)
+                pending.append(run)
+
+        if on_persisted is not None:
+            return pending
 
         exact_values = [
             run.result.objective
@@ -202,7 +279,11 @@ class ExperimentRunner:
         ]
         stored_exact = self.store.exact_objective(problem.problem_id)
         if exact_values:
-            best_known = max(exact_values)
+            best_known = (
+                max(exact_values)
+                if problem.sense is OptimizationSense.MAXIMIZE
+                else min(exact_values)
+            )
             source = "exact_optimum"
         elif stored_exact is not None:
             best_known = stored_exact
@@ -215,7 +296,11 @@ class ExperimentRunner:
                 and run.result.feasible
                 and run.result.objective is not None
             ]
-            best_known = max(observed) if observed else None
+            best_known = (
+                (max(observed) if problem.sense is OptimizationSense.MAXIMIZE else min(observed))
+                if observed
+                else None
+            )
             source = "best_observed_not_proven_optimal" if observed else None
 
         completed = [self._add_comparison(run, problem, best_known, source) for run in pending]
@@ -284,7 +369,13 @@ class ExperimentRunner:
         else:
             # Generate once per repeat, then place the identical immutable sequence into
             # every solver configuration and persisted experiment record.
-            candidates = generate_parameter_candidates(p, optimizer_trials, reference_seed)
+            try:
+                candidates = generate_parameter_candidates(p, optimizer_trials, reference_seed)
+            except MissingOptionalDependency:
+                # Optional candidate-generation dependencies must not prevent
+                # classical baselines from running. Quantum solvers will record
+                # their own unavailable result through the normal executor.
+                return prepared
 
         serialized = [list(candidate) for candidate in candidates]
         for name in quantum_names:
@@ -301,7 +392,7 @@ class ExperimentRunner:
             prepared[name] = SolverConfig(seed=reference_seed, parameters=parameters)
         return prepared
 
-    def reproduce(self, run_id: str) -> ExperimentRun:
+    def reproduce(self, run_id: str, *, web_task_id: str | None = None) -> ExperimentRun:
         original = self.store.get(run_id)
         problem = problem_from_dict(original.problem)
         solver = get_solver(original.result.solver_name)
@@ -310,4 +401,5 @@ class ExperimentRunner:
             solver,
             original.solver_config,
             rerun_of=original.run_id,
+            web_task_id=web_task_id,
         )

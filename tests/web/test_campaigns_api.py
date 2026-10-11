@@ -167,3 +167,24 @@ def test_report_without_runs_fails(web_env):
         "/api/v1/reports/campaigns/campaign-nothing", json={"formats": ["json"]}
     )
     assert response.status_code in (400, 404)
+
+
+def test_paired_analysis_and_csv_downloads(web_env):
+    client = web_env["client"]
+    campaign_id = _run_small_campaign(client)
+    response = client.post(
+        f"/api/v1/analysis/campaigns/{campaign_id}",
+        json={"comparisons": ["paired_solvers"]},
+    )
+    assert response.status_code == 200
+    assert response.json()["instances"][0]["reference_optimum"] is not None
+    created = client.post(
+        f"/api/v1/reports/campaigns/{campaign_id}",
+        json={"comparisons": ["paired_solvers"], "formats": ["json", "csv"]},
+    )
+    assert created.status_code == 200
+    report_id = created.json()["report_id"]
+    for name in ("runs", "pairs", "repeats"):
+        response = client.get(f"/api/v1/reports/{report_id}/files/{report_id}_{name}.csv")
+        assert response.status_code == 200
+        assert response.text.splitlines()[0]

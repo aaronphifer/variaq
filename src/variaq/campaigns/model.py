@@ -76,6 +76,13 @@ class ExperimentCampaign:
             raise ValidationError("Campaign problem_seeds cannot be empty")
         if not self.solvers:
             raise ValidationError("Campaign solvers cannot be empty")
+        for label, values in (
+            ("problem_sizes", self.problem_sizes),
+            ("problem_seeds", self.problem_seeds),
+            ("solvers", self.solvers),
+        ):
+            if len(set(values)) != len(values):
+                raise ValidationError(f"Campaign {label} must not contain duplicates")
         if self.repeats < 1:
             raise ValidationError("Campaign repeats must be positive")
         if any(size < 1 for size in self.problem_sizes):

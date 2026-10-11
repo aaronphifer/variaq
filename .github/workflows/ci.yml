@@ -28,6 +28,42 @@ jobs:
       - name: Build distributions
         run: python -m build
 
+  base-wheel:
+    name: Base wheel without optional dependencies
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install build pytest
+      - run: python -m build
+      - run: python -m pip install dist/*.whl
+      - name: Verify unavailable backends and missing web hint
+        run: |
+          python - <<'PY'
+          import importlib.util
+          import json
+          import subprocess
+          import sys
+          for name in ("numpy", "qiskit", "cudaq", "fastapi"):
+              assert importlib.util.find_spec(name) is None, name
+          result = subprocess.run([sys.executable, "-m", "variaq", "capabilities", "--json"], capture_output=True, text=True, check=True, timeout=30)
+          envelope = json.loads(result.stdout)
+          assert envelope["schema_version"] == "1"
+          solvers = {item["name"]: item for item in envelope["data"]["solvers"]}
+          assert solvers["exact"]["available"]
+          for name in ("qaoa", "cudaq-cpu", "cudaq-gpu"):
+              assert not solvers[name]["installed"], name
+              assert not solvers[name]["available"], name
+          web = subprocess.run([sys.executable, "-m", "variaq", "web"], capture_output=True, text=True, timeout=30)
+          assert web.returncode == 2, web
+          assert "variaq[web]" in web.stdout + web.stderr, web
+          PY
+      - name: Test installed base wheel
+        run: python -m pytest tests/test_problems.py tests/test_experiments.py tests/test_identity.py tests/test_solvers.py tests/test_json_contract.py tests/test_capabilities.py tests/test_campaigns.py tests/test_paired_benchmarks.py tests/test_comparison_view.py tests/test_release_hardening.py
+
   test-windows:
     runs-on: windows-latest
     timeout-minutes: 15
@@ -40,7 +76,7 @@ jobs:
       - name: Install
         run: python -m pip install -e '.[dev,web]'
       - name: Test
-        run: pytest tests/test_problems.py tests/test_new_families.py tests/test_identity.py tests/test_capabilities.py tests/test_json_contract.py tests/test_cli.py tests/test_experiments.py tests/test_bqm.py tests/test_family_qaoa.py tests/test_campaigns.py tests/test_analysis.py tests/test_sense_and_historical.py tests/web
+        run: python -m pytest -q
       - name: Lint
         run: ruff check .
       - name: Formatting

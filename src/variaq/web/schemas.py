@@ -13,7 +13,41 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from variaq.campaigns.model import CAMPAIGN_FORMAT_VERSION, DEFAULT_MAX_RUNS
 
-ALLOWED_COMPARISONS = {"classical_vs_quantum", "qiskit_vs_cudaq", "gpu_vs_cpu"}
+ALLOWED_COMPARISONS = {"classical_vs_quantum", "qiskit_vs_cudaq", "gpu_vs_cpu", "paired_solvers"}
+
+
+class ReproductionRequest(BaseModel):
+    """JSON-only intent; no arbitrary execution configuration is accepted."""
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class SolverOverrideIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    seed: int | None = None
+    parameters: dict[str, Any] = Field(default_factory=dict, max_length=32)
+
+    @field_validator("parameters")
+    @classmethod
+    def budgets_bounded(cls, value: dict[str, Any]) -> dict[str, Any]:
+        ceilings = {
+            "p": 8,
+            "optimizer_trials": 10000,
+            "shots": 1000000,
+            "restarts": 10000,
+            "max_passes": 10000,
+        }
+        for key, ceiling in ceilings.items():
+            if key in value:
+                number = value[key]
+                if (
+                    isinstance(number, bool)
+                    or not isinstance(number, int)
+                    or not 1 <= number <= ceiling
+                ):
+                    raise ValueError(f"{key} must be an integer between 1 and {ceiling}")
+        return value
 
 
 class CampaignDefinitionIn(BaseModel):
@@ -29,6 +63,7 @@ class CampaignDefinitionIn(BaseModel):
     repeats: int = Field(default=1, ge=1, le=100)
     base_seed: int = Field(default=0)
     generator_parameters: dict[str, Any] = Field(default_factory=dict)
+    solver_config: dict[str, SolverOverrideIn] = Field(default_factory=dict, max_length=20)
     tags: list[str] = Field(default_factory=list, max_length=20)
     notes: str = Field(default="", max_length=4000)
     campaign_format_version: str = CAMPAIGN_FORMAT_VERSION
@@ -36,8 +71,18 @@ class CampaignDefinitionIn(BaseModel):
     @field_validator("problem_sizes")
     @classmethod
     def sizes_positive(cls, value: list[int]) -> list[int]:
-        if any(v < 1 for v in value):
-            raise ValueError("problem_sizes must be positive integers")
+        if any(not 1 <= v <= 256 for v in value):
+            raise ValueError("Web problem_sizes must be integers between 1 and 256")
+        return value
+
+    @field_validator("generator_parameters")
+    @classmethod
+    def dimensions_bounded(cls, value: dict[str, Any]) -> dict[str, Any]:
+        for key in ("resource_count", "partition_count"):
+            if key in value:
+                count = value[key]
+                if isinstance(count, bool) or not isinstance(count, int) or not 1 <= count <= 256:
+                    raise ValueError(f"Web {key} must be an integer between 1 and 256")
         return value
 
     def to_definition(self) -> dict[str, Any]:
@@ -51,6 +96,10 @@ class CampaignDefinitionIn(BaseModel):
             "repeats": self.repeats,
             "base_seed": self.base_seed,
             "generator_parameters": dict(self.generator_parameters),
+            "solver_config": {
+                name: override.model_dump(exclude_none=True)
+                for name, override in self.solver_config.items()
+            },
             "tags": list(self.tags),
             "notes": self.notes,
         }
@@ -108,3 +157,18 @@ class ReportRequest(BaseModel):
         if unknown:
             raise ValueError(f"Unknown comparisons: {sorted(unknown)}")
         return value
+
+
+class ComparisonRequest(BaseModel):
+    """A bounded presentation query; scientific analysis stays in Python."""
+
+    model_config = ConfigDict(extra="forbid")
+    campaign_id: str | None = Field(default=None, max_length=128)
+    run_ids: list[str] | None = Field(default=None, min_length=1, max_length=500)
+    problem_id: str | None = Field(default=None, max_length=128)
+    solver: str | None = Field(default=None, max_length=64)
+    backend: str | None = Field(default=None, max_length=128)
+    size: int | None = Field(default=None, ge=1)
+    warmup: Literal["explicit_warmup", "unwarmed", "unknown", "not_applicable"] | None = None
+    limit: int = Field(default=500, ge=1, le=500)
+    offset: int = Field(default=0, ge=0)

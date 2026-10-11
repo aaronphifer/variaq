@@ -1,33 +1,35 @@
 {% extends "base.html" %}
-{% block title %}New campaign · VariaQ{% endblock %}
+{% block title %}New experiment · VariaQ{% endblock %}
 {% block content %}
 <section class="page-head">
-  <h1>New campaign</h1>
-  <p class="muted">Define a campaign, review its plan, then run it. Execution is local and sequential.</p>
+  <h1>New experiment</h1>
+  <p class="muted">Build a reproducible experiment in three steps. A campaign records each solver repeat as an individual run.</p>
 </section>
-<form id="campaign-form" class="campaign-form" novalidate>
+<ol class="workflow-steps" aria-label="Experiment workflow"><li>1 · Choose problem &amp; solvers</li><li>2 · Review execution plan</li><li>3 · Run &amp; compare</li></ol>
+<form id="campaign-form" class="campaign-form">
   <div class="grid-2col">
     <fieldset>
-      <legend>Identity</legend>
-      <label>Name <input type="text" name="name" required maxlength="200" placeholder="e.g. maxcut-scaling-aug"></label>
+      <legend>Choose your problem</legend>
+      <label>Name <input type="text" name="name" required maxlength="200" value="Small solver comparison" placeholder="Name your experiment"></label>
       <label>Family
         <select name="family" id="campaign-family">
-          <option value="maxcut">maxcut</option>
-          <option value="assignment">assignment</option>
-          <option value="subset-selection">subset-selection</option>
-          <option value="graph-partition">graph-partition</option>
+          <option value="maxcut">MaxCut · maximize cut weight</option>
+          <option value="assignment">Assignment · allocate resources</option>
+          <option value="subset-selection">Subset selection · choose items</option>
+          <option value="graph-partition">Graph partition · minimize cut weight</option>
         </select>
       </label>
+      <label>Reference recipe<select id="reference-recipe"><option value="small">Small deterministic reference · size 6, seed 11</option><option value="matrix">Scaling reference · sizes 4, 6, 8; seeds 11, 42</option><option value="custom">Custom generated instances</option></select></label><p class="form-help">Instances use the selected family’s reference generator. Problem seed fixes the mathematical instance; solver seed controls search and sampling. Canonical problem IDs are saved with every run.</p>
       <label>Notes <input type="text" name="notes" maxlength="4000" placeholder="optional"></label>
     </fieldset>
     <fieldset>
       <legend>Problem grid</legend>
       <label>Problem sizes <span class="muted">(comma-separated)</span>
-        <input type="text" name="problem_sizes" required value="6, 8, 10"></label>
+        <input type="text" name="problem_sizes" required value="6"></label>
       <label>Problem seeds <span class="muted">(comma-separated)</span>
-        <input type="text" name="problem_seeds" required value="1, 2"></label>
-      <label>Repeats per solver <input type="number" name="repeats" min="1" max="100" value="1"></label>
-      <label>Base seed <input type="number" name="base_seed" value="0"></label>
+        <input type="text" name="problem_seeds" required value="11"></label>
+      <label>Repeats per solver <input type="number" name="repeats" min="1" max="100" value="3"></label>
+      <label>Base seed <input type="number" name="base_seed" value="42"></label>
     </fieldset>
   </div>
   <fieldset>
@@ -35,17 +37,21 @@
     <div id="solver-picker" class="check-row" role="group" aria-label="Solvers"></div>
     <p class="muted" id="solver-hint">Availability is checked from VariaQ capabilities when you plan.</p>
   </fieldset>
+  <details class="panel"><summary>Advanced generator &amp; solver settings</summary><p class="form-help">Quantum Approximate Optimization Algorithm (QAOA) searches circuit parameters on a local simulator. More candidates, shots, or circuit layers increase requested work. Statevector memory grows exponentially with binary variables.</p>
+<fieldset><legend>QAOA controls · shared across selected simulators <span data-help="Quantum Approximate Optimization Algorithm: a parameterized quantum circuit optimized here with local CPU or GPU simulation. It is not physical-QPU execution."></span></legend><div class="grid-2col"><label>Circuit layers (depth p)<input id="qaoa-depth" type="number" min="1" max="8" value="1"></label><label>Parameter candidates<input id="qaoa-trials" type="number" min="1" max="1024" value="8"></label><label>Shots (sampled bit strings)<input id="qaoa-shots" type="number" min="1" max="100000" value="128"></label><label>CUDA-Q GPU precision (CPU uses FP64)<select id="qaoa-precision"><option value="fp64">FP64 · double precision</option><option value="fp32">FP32 · single precision</option></select></label></div><label class="check"><input id="qaoa-warmup" type="checkbox">Explicit simulator warmup before parameter search</label><p class="form-help">Warmup stays inside wall and compute timings. This does not establish a verified cold start.</p></fieldset>
   <fieldset id="family-params">
     <legend>Generator parameters <span class="muted">(family-specific)</span></legend>
     <div id="family-param-fields" class="grid-2col"></div>
   </fieldset>
+  </details>
+  <p id="run-count-preview" class="notice" role="status"></p>
   <div class="actions">
-    <button type="submit" class="button">Plan campaign</button>
+    <button type="submit" class="button">Review execution plan</button>
   </div>
 </form>
 
 <section id="plan-section" class="panel" hidden aria-labelledby="plan-h">
-  <h2 id="plan-h">Plan</h2>
+  <h2 id="plan-h">Review before starting</h2><p class="muted">Confirm the instances, solver availability, and resource implications below. Editing setup invalidates this plan.</p>
   <div id="plan-body"></div>
   <form id="run-form">
     <div id="plan-override" class="notice warn" hidden>
@@ -56,8 +62,8 @@
       </label>
     </div>
     <div class="actions">
-      <button type="submit" class="button primary" id="run-campaign-btn">Run campaign</button>
-      <span id="run-status" class="notice" role="status"></span>
+      <button type="submit" class="button primary" id="run-campaign-btn" disabled>Start local experiment</button>
+      <span id="run-status" class="notice" role="status"></span><progress id="run-progress" value="0" max="100" hidden aria-label="Recorded experiment progress"></progress>
     </div>
   </form>
 </section>

@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="color-scheme" content="light">
+<meta name="color-scheme" content="dark">
 <title>{% block title %}VariaQ{% endblock %}</title>
 <link rel="stylesheet" href="/static/app.css">
 <link rel="icon" href="data:,">
@@ -12,9 +12,10 @@
 <a class="skip-link" href="#main">Skip to content</a>
 <header class="topbar">
   <div class="topbar-inner">
-    <a class="brand" href="/">VariaQ</a>
+    <a class="brand" href="/"><span class="brand-symbol" aria-hidden="true">V<span>Q</span></span> VariaQ <small>RESEARCH LAB</small></a>
     <nav class="nav" aria-label="Primary">
       <a href="/" {% if active_page == 'dashboard' %}aria-current="page"{% endif %}>Dashboard</a>
+      <a href="/compare" {% if active_page == 'comparison' %}aria-current="page"{% endif %}>Compare</a>
       <a href="/campaigns" {% if active_page in ('campaigns', 'campaign_detail', 'campaign_new') %}aria-current="page"{% endif %}>Campaigns</a>
       <a href="/runs" {% if active_page in ('runs', 'run_detail') %}aria-current="page"{% endif %}>Runs</a>
       <a href="/problems" {% if active_page in ('problems', 'problem_detail') %}aria-current="page"{% endif %}>Problems</a>
@@ -32,6 +33,7 @@
 <script src="/static/vendor/chart.umd.min.js" defer></script>
 <script src="/static/app.js" defer></script>
 <script src="/static/app2.js" defer></script>
+<script src="/static/benchmark.js" defer></script>
 {% block scripts %}{% endblock %}
 </body>
 </html>

@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "variaq"
-version = "0.7.0"
+version = "0.8.0"
 description = "Local-first reproducible comparison of classical, GPU-accelerated, and quantum methods"
 readme = "README.md"
 requires-python = ">=3.12"
@@ -20,7 +20,7 @@ keywords = [
   "reproducibility",
 ]
 classifiers = [
-  "Development Status :: 3 - Alpha",
+  "Development Status :: 4 - Beta",
   "Intended Audience :: Science/Research",
   "Operating System :: OS Independent",
   "Programming Language :: Python :: 3",
@@ -58,6 +58,20 @@ variaq = "variaq.cli:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/variaq"]
+
+[tool.hatch.build.targets.sdist]
+include = [
+  "/src",
+  "/tests",
+  "/docs",
+  "/benchmarks",
+  "/examples",
+  "/*.md",
+  "/LICENSE",
+  "/pyproject.toml",
+  "/.github",
+  "/.gitignore",
+]
 
 [tool.pytest.ini_options]
 addopts = "-q"

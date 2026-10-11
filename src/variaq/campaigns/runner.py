@@ -10,7 +10,7 @@ from variaq.errors import ValidationError
 from variaq.experiments.runner import ExperimentRunner
 from variaq.models import ExperimentRun, SolverConfig
 from variaq.problems.assignment import AssignmentProblem
-from variaq.problems.base import ProblemInstance, save_problem
+from variaq.problems.base import ProblemInstance, load_problem, save_problem
 from variaq.problems.graph_partition import GraphPartitionProblem
 from variaq.problems.maxcut import MaxCutProblem
 from variaq.problems.subset_selection import SubsetSelectionProblem
@@ -81,6 +81,7 @@ class CampaignRunner:
         override_max_runs: bool = False,
         on_run_recorded: Any | None = None,
         should_abort: Any | None = None,
+        web_task_id: str | None = None,
     ) -> dict[str, Any]:
         """Execute a campaign sequentially.
 
@@ -125,7 +126,12 @@ class CampaignRunner:
                         campaign.family, size, seed, campaign.generator_parameters
                     )
                 problem = generated_problems[key]
-                save_problem(problem, self.problems_dir / f"{problem.problem_id}.json")
+                problem_path = self.problems_dir / f"{problem.problem_id}.json"
+                if problem_path.exists():
+                    if load_problem(problem_path).identity_payload() != problem.identity_payload():
+                        raise ValidationError(f"Existing problem artifact differs: {problem_path}")
+                else:
+                    save_problem(problem, problem_path)
 
                 configs: dict[str, SolverConfig] = {}
                 for solver_name, solver in solver_instances.items():
@@ -142,39 +148,36 @@ class CampaignRunner:
                     configs[solver_name] = SolverConfig(seed=base_seed, parameters=parameters)
 
                 if not configs:
-                    summary_statuses["skipped"] += campaign.repeats * len(solver_instances)
                     continue
 
-                try:
-                    runs = self.runner.benchmark(
-                        problem,
-                        list(solver_instances.values()),
-                        configs,
-                        repeats=campaign.repeats,
-                    )
-                except Exception:
-                    # If the whole benchmark matrix fails, record one failure per requested run
-                    # and continue to the next problem instance.
-                    for _solver_name in configs:
-                        for _ in range(campaign.repeats):
-                            summary_statuses["failed"] += 1
-                            # No run ID exists; store association is impossible.
-                    continue
-
-                for run in runs:
+                def recorded(run: ExperimentRun) -> None:
                     all_runs.append(run)
                     status = run.result.status.value
-                    summary_statuses[status] = summary_statuses.get(status, 0) + 1
+                    summary_statuses[status] += 1
                     self.store.record_run(
-                        campaign_id=campaign_id,
-                        run_id=run.run_id,
-                        status=status,
-                        solver_name=run.result.solver_name,
-                        problem_id=run.result.problem_id,
-                        created_at=run.created_at,
+                        campaign_id,
+                        run.run_id,
+                        status,
+                        run.result.solver_name,
+                        run.result.problem_id,
+                        run.created_at,
                     )
                     if on_run_recorded is not None:
                         on_run_recorded(run, len(all_runs))
+
+                self.runner.benchmark(
+                    problem,
+                    [solver_instances[name] for name in configs],
+                    configs,
+                    repeats=campaign.repeats,
+                    on_persisted=recorded,
+                    campaign_id=campaign_id,
+                    web_task_id=web_task_id,
+                    should_abort=should_abort,
+                )
+                if should_abort is not None and should_abort():
+                    aborted = True
+                    break
 
         if aborted:
             summary_statuses["aborted"] = 1
@@ -199,4 +202,5 @@ class CampaignRunner:
             "status_summary": summary_statuses,
             "problem_ids": sorted({run.result.problem_id for run in all_runs}),
             "run_ids": [run.run_id for run in all_runs],
+            "skipped_runs": summary_statuses["skipped"],
         }
