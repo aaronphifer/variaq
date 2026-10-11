@@ -9,6 +9,7 @@ from typing import Any
 
 from variaq import __version__
 from variaq.analysis.models import AnalysisResult
+from variaq.errors import ValidationError
 from variaq.models import utc_now
 
 REPORT_FORMAT_VERSION = "1"
@@ -21,13 +22,14 @@ class ReportArtifact:
         self.report_id = report_id
         self.campaign_id = campaign_id
         self.analysis = analysis
+        self.generated_at = utc_now()
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "report_format_version": REPORT_FORMAT_VERSION,
             "report_id": self.report_id,
             "campaign_id": self.campaign_id,
-            "generated_at": utc_now(),
+            "generated_at": self.generated_at,
             "variaq_version": __version__,
             "source_run_ids": list(self.analysis.source_run_ids),
             "analysis": self.analysis.to_dict(),
@@ -36,6 +38,14 @@ class ReportArtifact:
 
 def _safe_path(directory: Path, filename: str, overwrite: bool = False) -> Path:
     target = directory / filename
+    if (
+        Path(filename).name != filename
+        or "/" in filename
+        or "\\" in filename
+        or target.is_symlink()
+        or target.resolve().parent != directory.resolve()
+    ):
+        raise ValidationError("Requested file is outside the report root or is a symlink")
     if target.exists() and not overwrite:
         raise FileExistsError(f"Report file exists: {target}; use --overwrite to replace")
     target.parent.mkdir(parents=True, exist_ok=True)
@@ -65,6 +75,28 @@ def _group_rows(groups: list[Any]) -> list[dict[str, Any]]:
         row["wall_time_mean"] = group["timing"]["total_wall_time_seconds"]["mean"]
         rows.append(row)
     return rows
+
+
+def _flat_row(value: dict[str, Any], prefix: str = "") -> dict[str, Any]:
+    """Keep nested scalar metrics useful in CSV; retain lists as lossless JSON."""
+    row: dict[str, Any] = {}
+    for key, item in value.items():
+        name = f"{prefix}{key}"
+        if isinstance(item, dict) and item:
+            row.update(_flat_row(item, name + "."))
+        elif isinstance(item, (dict, list, tuple)):
+            row[name] = json.dumps(item, sort_keys=True)
+        else:
+            row[name] = item
+    return row
+
+
+def _write_rows(path: Path, rows: list[dict[str, Any]], empty_fields: list[str]) -> None:
+    fields = sorted({key for row in rows for key in row}) or empty_fields
+    with path.open("w", newline="", encoding="utf-8") as stream:
+        writer = csv.DictWriter(stream, fieldnames=fields)
+        writer.writeheader()
+        writer.writerows(rows)
 
 
 def write_csv_report(
@@ -100,6 +132,27 @@ def write_csv_report(
             writer.writerows(srows)
         result["scaling"] = scaling_path
 
+    if any(c["comparison_type"] == "paired_solvers" for c in analysis["comparisons"]):
+        run_rows = [_flat_row(r) for i in analysis["instances"] for r in i["runs"]]
+        pair_rows = [
+            _flat_row(p)
+            for c in analysis["comparisons"]
+            if c["comparison_type"] == "paired_solvers"
+            for p in c["pairs"]
+        ]
+        repeat_rows = [
+            _flat_row({"problem_id": i["problem_id"], **r})
+            for i in analysis["instances"]
+            for r in i["repeats"]
+        ]
+        for name, records, fields in (
+            ("runs", run_rows, ["run_id", "problem_id", "objective"]),
+            ("pairs", pair_rows, ["problem_id", "left_run_id", "right_run_id"]),
+            ("repeats", repeat_rows, ["problem_id", "solver", "warmup_mode"]),
+        ):
+            target = _safe_path(directory, f"{report.report_id}_{name}.csv", overwrite)
+            _write_rows(target, records, fields)
+            result[name] = target
     return result
 
 
@@ -113,7 +166,7 @@ def write_markdown_report(
         "",
         f"- **VariaQ version:** {__version__}",
         f"- **Report format version:** {REPORT_FORMAT_VERSION}",
-        f"- **Generated at:** {utc_now()}",
+        f"- **Generated at:** {report.generated_at}",
     ]
     if report.campaign_id:
         lines.append(f"- **Campaign ID:** {report.campaign_id}")
@@ -157,6 +210,104 @@ def write_markdown_report(
                 f"| {point['x_metric']}={point['x_value']} | {key} | {point['count']} | "
                 f"{q['best_objective']} | {t['mean']} |"
             )
+        lines.append("")
+
+    if analysis["instances"]:
+        lines.extend(
+            [
+                "## Paired per-instance analysis",
+                "",
+                "Objectives are re-evaluated by the original problem. Gaps require an exact",
+                "reference in the selected runs. Null means unavailable; CSV/JSON carry reasons.",
+                "Unwarmed runs do not establish a fresh GPU context. Simulator timings do not",
+                "demonstrate quantum advantage. Solver compute scopes may differ from wall time.",
+                "",
+                "| problem | run | solver | status | objective | gap % | feasible | wall s | "
+                "compute s | init s | warmup s | mode |",
+                "|" + "|".join(["---"] * 12) + "|",
+            ]
+        )
+        missing_notes: list[str] = []
+        for instance in analysis["instances"]:
+            for r in instance["runs"]:
+                t = r["timing"]
+                values = [
+                    instance["problem_id"],
+                    r["run_id"],
+                    r["solver"],
+                    r["status"],
+                    r["objective"],
+                    r["optimality_gap_percent"],
+                    r["feasible"],
+                    t["wall_time_seconds"],
+                    t["solver_time_seconds"],
+                    t["initialization_seconds"],
+                    t["warmup_seconds"],
+                    r["warmup_mode"],
+                ]
+                lines.append(
+                    "| " + " | ".join("null" if v is None else str(v) for v in values) + " |"
+                )
+                if r["missing_measurements"]:
+                    reasons = "; ".join(f"{k}: {v}" for k, v in r["missing_measurements"].items())
+                    missing_notes.append(f"- `{r['run_id']}`: {reasons}")
+        lines.extend(["", "Missing measurement reasons:", "", *missing_notes])
+        lines.extend(
+            [
+                "",
+                "## Repeat variability",
+                "",
+                "Sample standard deviation is null with fewer than two observations.",
+                "",
+                "| problem | solver | mode | objective n | objective mean | objective std | "
+                "wall n | wall mean s | wall std s |",
+                "|" + "|".join(["---"] * 9) + "|",
+            ]
+        )
+        for instance in analysis["instances"]:
+            for r in instance["repeats"]:
+                o, t = r["objective"], r["timing"]["wall_time_seconds"]
+                values = [
+                    instance["problem_id"],
+                    r["solver"],
+                    r["warmup_mode"],
+                    o["count"],
+                    o["mean"],
+                    o["std"],
+                    t["count"],
+                    t["mean"],
+                    t["std"],
+                ]
+                lines.append(
+                    "| " + " | ".join("null" if v is None else str(v) for v in values) + " |"
+                )
+        lines.append("")
+    for comparison in analysis["comparisons"]:
+        if comparison["comparison_type"] != "paired_solvers":
+            continue
+        lines.extend(
+            [
+                "## Paired solver observations",
+                "",
+                "Positive objective improvement favors the left solver for either objective sense.",
+                "",
+                "| problem | repeat | left run | right run | objective improvement left | "
+                "max expectation delta | reason |",
+                "|" + "|".join(["---"] * 7) + "|",
+            ]
+        )
+        for p in comparison["pairs"]:
+            n = p["numerical_correctness"]
+            values = [
+                p["problem_id"],
+                p["repeat_key"],
+                p["left_run_id"],
+                p["right_run_id"],
+                p["objective_improvement_left"],
+                n["max_expectation_delta"],
+                n["reason"] or p["missing_pairs"] or "matched expectations",
+            ]
+            lines.append("| " + " | ".join("null" if v is None else str(v) for v in values) + " |")
         lines.append("")
 
     if analysis["warnings"]:
@@ -222,6 +373,7 @@ def generate_report(
             "campaign_id": campaign_id,
             "query": analysis.query.to_dict(),
             "source_run_ids": sorted(analysis.source_run_ids),
+            "analysis": analysis.to_dict(),
         }
         import hashlib
 

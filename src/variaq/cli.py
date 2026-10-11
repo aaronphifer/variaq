@@ -31,7 +31,7 @@ from variaq.outputs import (
     solve_json_data,
 )
 from variaq.problems.assignment import AssignmentProblem
-from variaq.problems.base import ProblemInstance, load_problem, save_problem
+from variaq.problems.base import ProblemInstance, load_problem, problem_from_dict, save_problem
 from variaq.problems.graph_partition import GraphPartitionProblem
 from variaq.problems.maxcut import MaxCutProblem
 from variaq.problems.subset_selection import SubsetSelectionProblem
@@ -236,32 +236,19 @@ def _print_quantum_comparison(runs: list[ExperimentRun]) -> None:
     for seed, group in sorted(by_seed.items()):
         successful = [run for run in group if run.result.status is SolveStatus.SUCCESS]
         unavailable = [run for run in group if run.result.status is SolveStatus.UNAVAILABLE]
-        digests = {
-            str(run.result.backend.metrics.get("candidate_parameter_digest")) for run in successful
-        }
-        max_delta = 0.0
-        if len(successful) > 1:
-            reference = successful[0].result.backend.metrics.get("candidate_expectations", [])
-            for run in successful[1:]:
-                candidate = run.result.backend.metrics.get("candidate_expectations", [])
-                if len(candidate) == len(reference):
-                    max_delta = max(
-                        max_delta,
-                        max(
-                            (
-                                abs(float(a) - float(b))
-                                for a, b in zip(reference, candidate, strict=True)
-                            ),
-                            default=0.0,
-                        ),
-                    )
+        comparison = quantum_comparison_json_data(problem_from_dict(group[0].problem), group)[
+            "comparison"
+        ]
+        max_delta = comparison["max_expectation_delta"]
+        identical = comparison["identical_candidate_parameters"]
         best_indices = {
             run.result.solver_name: run.result.backend.metrics.get("best_parameter_index")
             for run in successful
         }
         print(
-            f"  seed={seed}: identical_candidates={'yes' if len(digests) <= 1 else 'NO'}, "
-            f"max_expectation_delta={max_delta:.3g}, best_parameter_indices={best_indices}"
+            f"  seed={seed}: identical_candidates={identical}, "
+            f"max_expectation_delta={_format_number(max_delta)}, "
+            f"best_parameter_indices={best_indices}"
         )
         for run in unavailable:
             reason = run.result.backend.metrics.get("reason", "unavailable")
@@ -404,7 +391,7 @@ def _build_parser() -> argparse.ArgumentParser:
         "--compare",
         action="append",
         default=[],
-        choices=["classical_vs_quantum", "qiskit_vs_cudaq", "gpu_vs_cpu"],
+        choices=["classical_vs_quantum", "qiskit_vs_cudaq", "gpu_vs_cpu", "paired_solvers"],
     )
 
     report = subcommands.add_parser("report", help="Generate reports from analysis results")
@@ -421,7 +408,7 @@ def _build_parser() -> argparse.ArgumentParser:
         "--compare",
         action="append",
         default=[],
-        choices=["classical_vs_quantum", "qiskit_vs_cudaq", "gpu_vs_cpu"],
+        choices=["classical_vs_quantum", "qiskit_vs_cudaq", "gpu_vs_cpu", "paired_solvers"],
     )
 
     runs = subcommands.add_parser("runs", help="Inspect or reproduce durable experiment runs")
@@ -964,6 +951,7 @@ def _command_report(
         run_ids=tuple(run_ids),
         group_by=tuple(args.group_by) if args.group_by else ("problem_id", "solver"),
         include_failed=True,
+        include_unavailable=True,
     )
     comparisons = tuple(args.compare) if args.compare else ()
     analysis = analyze_runs(runs, query, scaling_x_metric=args.scaling_x, comparisons=comparisons)

@@ -47,7 +47,7 @@ known VariaQ artifacts beneath the configured root.
 ## Default bind address and security
 
 The server binds to **127.0.0.1** by default: it is only reachable from this
-machine. The 0.7 UI is local-first software with **no hardened
+machine. The UI is local-first software with **no hardened
 internet-facing authentication or authorization**.
 
 If you deliberately bind to another address for a trusted lab LAN:
@@ -94,14 +94,16 @@ plots). Reports preserve `source_run_ids`. Downloads are restricted to files
 that belong to a known report artifact inside the reports root — the UI cannot
 read arbitrary files from disk.
 
-## Limitations (0.7.0)
+## Limits and recovery (0.8 candidate)
 
-- One campaign executes at a time per server process (deliberate, no worker
-  queue). Task state is in-memory: if the server is stopped mid-campaign,
-  already-recorded runs remain in the database, but the task progress entry is
-  lost.
+- One web execution runs at a time per database, enforced by an OS-held worker
+  lock, with durable SQLite task snapshots and no worker queue. On restart,
+  unfinished tasks become interrupted and completed attempts remain accessible.
+  Duplicate web submissions reconnect without executing again. There is no automatic
+  retry or safe native GPU cancellation. See [recovery and upgrade details](releases/v0.8.0-hardening.md).
 - No accounts, collaboration, or remote execution.
-- Charts cover campaign scaling analysis only.
+- Comparison charts cover selected per-instance quality, gaps, timing and repeat scaling.
+  Missing measurements remain null, and GPU cold state is not verified.
 
 ## Security model and non-goals
 
@@ -109,7 +111,7 @@ The web layer provides **no** shell execution, arbitrary Python import, raw
 SQL, arbitrary filesystem browsing, credential management, or telemetry.
 Write actions (campaign run, report generation) use explicit bounded schemas.
 
-Out of scope for 0.7: physical QPU access, IBM Runtime, AWS Braket, D-Wave,
+Out of scope for v0.8: physical QPU access, IBM Runtime, AWS Braket, D-Wave,
 cloud accounts, internet-hosted SaaS, and any domain-specific integration.
 
 ## API

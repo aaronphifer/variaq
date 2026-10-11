@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+{% block title %}Compare results · VariaQ{% endblock %}
+{% block content %}
+<section class="page-head"><div class="eyebrow">Evidence, with context</div><h1>Compare results</h1><p class="muted">Explore quality and timing on the same mathematical problem. Every measurement comes from VariaQ’s authoritative analysis.</p></section>
+<section class="panel">
+<h2>1. Choose your evidence</h2>
+<form id="comparison-form">
+<div class="filters"><label>Campaign<select id="compare-campaign"><option value="">Choose a campaign…</option></select></label><button type="submit">Load comparison</button></div>
+<details><summary>Select individual experiments instead</summary><label for="compare-ids">Run IDs, separated by commas (up to 500)</label><textarea id="compare-ids" rows="3" placeholder="run-… , run-…"></textarea><p class="form-help">Clear individual IDs to use the selected campaign. Standalone experiments remain unpaired.</p></details>
+</form><p id="comparison-status" role="status" class="notice">Loading available campaigns…</p>
+</section>
+<div id="comparison-workspace" hidden>
+<section class="panel"><h2>2. Focus the comparison</h2>
+<p id="comparison-window" class="provenance"></p>
+<nav class="pager" aria-label="Comparison window"><button id="compare-prev" type="button">Previous window</button><button id="compare-next" type="button">Next window</button></nav>
+<form id="comparison-filters" class="filters">
+<label>Chart instance<select id="compare-instance"></select></label>
+<label>Evidence instance<select id="compare-problem"><option value="">All instances</option></select></label>
+<label>Solver<select id="compare-solver"><option value="">All solvers</option></select></label>
+<label>Backend<select id="compare-backend"><option value="">All backends</option></select></label>
+<label>Logical size<select id="compare-size"><option value="">All sizes</option></select></label>
+<label>Warmup<select id="compare-warmup"><option value="">All modes</option><option value="unwarmed">No explicit warmup</option><option value="explicit_warmup">Explicit warmup</option><option value="not_applicable">Classical · not applicable</option><option value="unknown">Historical · unknown</option></select></label>
+<button type="submit">Apply filters</button></form>
+<p class="form-help">Charts show one instance. Evidence filters also change exports and exact references.</p>
+</section>
+
+<section class="panel"><h2 id="comparison-title">Instance measurements</h2><p id="comparison-reference" class="notice"></p><p class="form-help">Objective gap <span data-help="The difference from a feasible, consistent selected exact optimum, respecting maximize or minimize. Relative gaps divide by the absolute optimum. A nonzero gap to a zero optimum has no defined percentage."></span> · Feasibility <span data-help="A decoded solution is feasible only when it satisfies the original problem constraints. Failed or unavailable runs do not supply a feasible solution."></span></p><p id="comparison-scope" class="chart-note"></p><section class="stat-grid" id="comparison-summary" aria-label="Current instance summary"></section>
+<details class="methodology"><summary>How to read these comparisons</summary><p>Quality summaries include only successful, feasible, authoritatively evaluated runs of this instance. Achievement includes selected exact runs and uses only runs with a consistent selected exact reference: the objective must be within 1e-9 of that optimum. Its denominator is shown explicitly. Relative gaps can be undefined for a zero optimum even when absolute gaps exist.</p><p>Each chart row is a descriptive mean within one solver, backend/version, configuration, precision, warmup mode, benchmark execution, environment and timing scope. Seeds and candidate angles may vary across repeated searches; exact controls and source run IDs remain available below. These summaries do not establish paired experimental controls. Pairing still requires the same canonical problem, benchmark execution and repeat slot.</p><p>Wall time includes the solver call and setup; persistence is excluded for current records. Compute and warmup scopes are solver-specific. Search and expectation times overlap; layers must not be added. Historical scopes may be unknown. Failed, infeasible and unevaluable records are excluded from these quality and timing row summaries. Missing values stay unavailable, never zero. No speedup ratio is inferred.</p><p>Scaling retains existing per-instance repeat timing summaries, whose successful timing observations can include infeasible solutions; each point’s count and controls are in its data table. It keeps distinct instances and configurations as separate points. A bounded window can split repeat pairs; use an instance filter for focused evidence. Size and warmup filters apply within the labelled window. All quantum backends are local simulators; no physical QPU or quantum advantage is established.</p></details>
+<p id="comparison-chart-limit" class="notice warn" hidden></p>
+<div class="chart-grid">
+{% for id, title in [('quality','Objective quality'),('gap','Optimality gap (%)'),('timing','Timing layers (seconds)'),('scaling','Wall time by logical size (seconds)')] %}
+<figure class="chart-box"><figcaption>{{ title }}</figcaption><div class="chart-canvas"><canvas id="compare-chart-{{ id }}" role="img" aria-label="{{ title }}; values in the following data table"></canvas></div><p id="compare-chart-{{ id }}-note" class="chart-note"></p>{% if id == "gap" %}<p id="comparison-gap-state" class="notice" role="status"></p>{% endif %}<details><summary>Accessible chart data</summary><div class="table-wrap"><table id="compare-chart-{{ id }}-data" class="sr-data"></table></div></details></figure>
+{% endfor %}
+</div>
+<details class="solver-summary" open><summary>Solver summary &amp; source controls</summary><div id="comparison-groups"></div></details>
+</section>
+<section class="panel"><h2>Repeat variability <span data-help="Statistics describe repeated observations within one configuration. Sample standard deviation is unavailable with fewer than two observations. These are not confidence intervals."></span></h2><details><summary>Explore repeat statistics</summary><p class="form-help">Summaries stay within an instance, solver, backend, configuration, and warmup mode. Standard deviation requires at least two observations; it is not a confidence interval.</p><div id="comparison-repeats"></div></details></section>
+<section class="panel"><h2>Pairing &amp; numerical agreement <span data-help="Paired runs share a canonical problem, benchmark execution, and repeat slot. Numerical expectation agreement is separate from objective quality and timing."></span></h2><details><summary>Pairing methodology</summary><p class="form-help">Pairing requires the same problem, benchmark execution, and repeat slot. Paired records can still have failed or missing solutions. Numerical agreement compares controlled simulator expectations and establishes no quantum advantage.</p></details><div id="comparison-pairs"></div></section>
+<section class="panel"><details><summary>Measurements, unavailable reasons &amp; provenance</summary><div id="comparison-runs"></div></details></section>
+<section class="panel"><h2>Reproducible exports</h2><p class="muted">JSON, CSV and Markdown for the selected window, including all instances, source run IDs and unavailable reasons.</p><button id="comparison-export" type="button">Generate report &amp; downloads</button><p id="comparison-export-status" class="notice" role="status"></p></section>
+</div>
+{% endblock %}
+{% block scripts %}<script>window.VARIAQ_PAGE = "comparison";</script>{% endblock %}

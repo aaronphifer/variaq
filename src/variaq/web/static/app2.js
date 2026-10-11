@@ -5,7 +5,7 @@
 (function () {
 const { apiGet, apiPost, esc, html, fmtNum, fmtTime, fmtBytes, shortId, statusPill, boolText, setStatus, kvFill, tableRows } = window.VARIAQ;
 
-const CHART_COLORS = ["#14548c", "#1b6b3a", "#8c5a00", "#9c1f1f", "#5b3f8c", "#0f6e73", "#745c00", "#333"];
+const CHART_COLORS = ["#89ccff", "#85e0b4", "#ffd18a", "#ff9baf", "#d0adff", "#98dbec"];
 
 function groupKeyLabel(key) {
   return Object.entries(key).map(([k, v]) => `${k}=${v}`).join(", ") || "(all runs)";
@@ -117,7 +117,7 @@ async function initCampaigns() {
         <td>${c.requested_runs}</td><td>${c.completed_runs}</td><td>${esc(counts)}</td></tr>`;
     }), 7, "No campaigns yet. Create one from “New campaign”.");
   } catch (err) {
-    setStatus("campaigns-status", `${err.type}: ${err.message}`, true);
+    setStatus("campaigns-status", `${err.type || "Validation"}: ${err.message}`, true);
   }
 }
 
@@ -128,7 +128,7 @@ async function pollActiveTask(regionId) {
     let payload;
     try { payload = await apiGet("/campaigns/tasks/current"); } catch { return; }
     const task = payload.task;
-    if (!task || (task.status !== "starting" && task.status !== "running")) {
+    if (!task || task.status === "completed") {
       region.hidden = true;
       return;
     }
@@ -139,8 +139,10 @@ async function pollActiveTask(regionId) {
       <strong>Campaign ${esc(task.status)}</strong> —
       ${task.completed_runs}${total ? " / " + total : ""} runs recorded
       <div class="progress" aria-hidden="true"><div style="width:${pct}%"></div></div>
-      <span class="muted">task ${esc(task.task_id)}</span></div>`;
-    setTimeout(refresh, 2000);
+      <span class="muted">task ${esc(task.task_id)}</span>
+      ${task.error ? `<p>${esc(task.error.message)}</p>` : ""}
+      ${task.campaign_id ? `<a href="/campaigns/${encodeURIComponent(task.campaign_id)}">Inspect stored campaign</a>` : ""}</div>`;
+    if (["starting", "running"].includes(task.status)) setTimeout(refresh, 2000);
   }
   refresh();
 }
@@ -150,7 +152,7 @@ async function initCampaignDetail() {
   const id = decodeURIComponent(location.pathname.split("/").pop());
   const runState = { offset: 0, limit: 25 };
   try {
-    const data = await apiGet("/campaigns/" + encodeURIComponent(id));
+    const data = await apiGet("/campaigns/" + encodeURIComponent(id) + "?limit=25");
     el("campaign-status").hidden = true;
     el("campaign-detail").hidden = false;
     const d = data.definition;
@@ -167,7 +169,7 @@ async function initCampaignDetail() {
     ]);
     kvFill(el("campaign-exec-kv"), [
       ["Requested runs", data.requested_runs],
-      ["Completed runs", data.completed_runs],
+      ["Recorded runs (all outcomes)", data.completed_runs],
       ["Status counts", Object.entries(data.status_counts || {}).map(([k, v]) => `${k}: ${v}`).join(", ") || "—"],
       ["Solver breakdown", Object.entries(data.solver_breakdown || {}).map(([k, v]) => `${k}: ${v}`).join(", ") || "—"],
     ]);
@@ -188,7 +190,7 @@ async function initCampaignDetail() {
       await generateCampaignReport(id, e.target);
     });
   } catch (err) {
-    setStatus("campaign-status", `${err.type}: ${err.message}`, true);
+    setStatus("campaign-status", `${err.type || "Validation"}: ${err.message}`, true);
   }
 }
 
@@ -206,7 +208,7 @@ async function loadCampaignRuns(campaignId, state) {
     el("campaign-runs-prev").disabled = data.offset === 0;
     el("campaign-runs-next").disabled = data.offset + data.limit >= data.total;
   } catch (err) {
-    setStatus("campaign-status", `${err.type}: ${err.message}`, true);
+    setStatus("campaign-status", `${err.type || "Validation"}: ${err.message}`, true);
   }
 }
 
@@ -234,7 +236,7 @@ async function runAnalysis(campaignId) {
     drawScalingChart("chart-qubits", "chart-qubits-table", pts, "qubits",
       p => p.resource.qubits);
   } catch (err) {
-    el("analysis-body").innerHTML = `<p class="notice error">${esc(err.type)}: ${esc(err.message)}</p>`;
+    el("analysis-body").innerHTML = `<p class="notice error">${esc(err.type || "Validation")}: ${esc(err.message)}</p>`;
   }
 }
 
@@ -267,7 +269,7 @@ async function generateCampaignReport(campaignId, form) {
     setStatus("report-gen-status", `Report ${result.report_id} written.${warn}`);
     await loadCampaignReports(campaignId);
   } catch (err) {
-    setStatus("report-gen-status", `${err.type}: ${err.message}`, true);
+    setStatus("report-gen-status", `${err.type || "Validation"}: ${err.message}`, true);
   }
 }
 
@@ -293,17 +295,19 @@ async function initCampaignNew() {
   const form = el("campaign-form");
   let lastPlan = null;
 
-  // Solver picker from live capabilities (no hardcoded matrix).
-  try {
-    const caps = await apiGet("/capabilities");
-    el("solver-picker").innerHTML = caps.solvers.map(s =>
-      `<label class="check"><input type="checkbox" name="solver" value="${esc(s.name)}"
-        ${s.available ? "" : "disabled"} ${["exact", "heuristic"].includes(s.name) ? "checked" : ""}>
-        ${esc(s.name)}${s.available ? "" : ` <span class="muted">(${esc(s.reason || "unavailable")})</span>`}</label>`
-    ).join("");
-  } catch (err) {
-    el("solver-picker").innerHTML = `<span class="notice error">${esc(err.message)}</span>`;
+  let capabilities = [];
+  function renderSolvers() {
+    const family = el("campaign-family").value;
+    const selected = [...form.querySelectorAll('input[name="solver"]:checked')].map(c=>c.value);
+    el("solver-picker").innerHTML = capabilities.map(s => {
+      const compatible = (s.supported_families || []).includes(family);
+      const enabled = s.available && compatible;
+      const description = s.name === "exact" ? "CPU · proven reference, exponential enumeration" : s.name === "heuristic" ? "CPU · seeded classical search" : s.name === "cudaq-gpu" ? "GPU · local QAOA simulation" : "CPU · local QAOA simulation";
+      return `<label class="check solver-card"><input type="checkbox" name="solver" value="${esc(s.name)}" ${enabled ? "" : "disabled"} ${enabled && (selected.length ? selected.includes(s.name) : ["exact","heuristic"].includes(s.name)) ? "checked" : ""}><span>${esc(s.name)}<small>${esc(description)}</small>${enabled ? '' : `<small>${esc(compatible ? s.reason || 'Backend unavailable' : 'Incompatible with this problem family')}</small>`}</span></label>`;
+    }).join("");
   }
+  try { capabilities = (await apiGet("/capabilities")).solvers; renderSolvers(); }
+  catch (err) { el("solver-picker").innerHTML = `<span class="notice error">${esc(err.message)}</span>`; }
 
   const familySelect = el("campaign-family");
   function renderFamilyParams() {
@@ -312,12 +316,19 @@ async function initCampaignNew() {
       `<label>${esc(f.label)} <input type="text" data-gen-param="${esc(f.name)}" value="${esc(f.value)}"></label>`
     ).join("") || `<p class="muted">No additional parameters for this family.</p>`;
   }
-  familySelect.addEventListener("change", renderFamilyParams);
+  familySelect.addEventListener("change", () => { renderFamilyParams(); renderSolvers(); invalidate(); });
   renderFamilyParams();
 
   function gatherDefinition() {
-    const sizes = form.problem_sizes.value.split(",").map(s => parseInt(s.trim(), 10)).filter(n => !Number.isNaN(n));
-    const seeds = form.problem_seeds.value.split(",").map(s => parseInt(s.trim(), 10)).filter(n => !Number.isNaN(n));
+    function integers(raw, positive=false) {
+      const parts=raw.split(',').map(s=>s.trim());
+      if(parts.some(s=>! /^-?\d+$/.test(s) || !Number.isSafeInteger(Number(s)) || (positive && Number(s)<1))) throw new Error('Enter complete comma-separated integers; sizes must be positive.');
+      const values=parts.map(Number);
+      if(new Set(values).size !== values.length) throw new Error('Remove duplicate sizes or seeds.');
+      return values;
+    }
+    const sizes = integers(form.problem_sizes.value,true);
+    const seeds = integers(form.problem_seeds.value);
     const solvers = [...form.querySelectorAll('input[name="solver"]:checked')].map(c => c.value);
     const genParams = {};
     for (const input of form.querySelectorAll("[data-gen-param]")) {
@@ -332,6 +343,7 @@ async function initCampaignNew() {
       problem_sizes: sizes,
       problem_seeds: seeds,
       solvers,
+      solver_config: Object.fromEntries(solvers.filter(s=>['qaoa','cudaq-cpu','cudaq-gpu'].includes(s)).map(s=>[s,{parameters:{p:Number(el('qaoa-depth').value),optimizer_trials:Number(el('qaoa-trials').value),shots:Number(el('qaoa-shots').value),warmup:el('qaoa-warmup').checked,...(s.startsWith('cudaq')?{precision:s==='cudaq-gpu'?el('qaoa-precision').value:'fp64'}:{})}}])),
       repeats: parseInt(form.repeats.value, 10) || 1,
       base_seed: parseInt(form.base_seed.value, 10) || 0,
       generator_parameters: genParams,
@@ -340,18 +352,37 @@ async function initCampaignNew() {
     };
   }
 
+  function invalidate() {
+    lastPlan = null;
+    el("plan-section").hidden = true;
+    el("run-campaign-btn").disabled = true;
+    try { const d = gatherDefinition(); el("run-count-preview").textContent = `${d.problem_sizes.length * d.problem_seeds.length * d.solvers.length * d.repeats} requested runs · local sequential execution. Review the plan for exact enumeration and simulator memory estimates.`; }
+    catch { el("run-count-preview").textContent = 'Complete the problem grid to preview the run count.'; }
+  }
+  form.addEventListener("input", invalidate);
+  form.addEventListener("change", invalidate);
+  el("reference-recipe").addEventListener("change", e=>{
+    if(e.target.value==='small') {form.problem_sizes.value='6';form.problem_seeds.value='11';}
+    if(e.target.value==='matrix') {form.problem_sizes.value='4, 6, 8';form.problem_seeds.value='11, 42';}
+    invalidate();
+  });
+  invalidate();
   form.addEventListener("submit", async e => {
     e.preventDefault();
+    lastPlan = null;
+    el("run-campaign-btn").disabled = true;
+    setStatus("run-status", "");
     try {
       const definition = gatherDefinition();
       const plan = await apiPost("/campaigns/plan", { definition });
+      if(JSON.stringify(definition)!==JSON.stringify(gatherDefinition())) throw new Error("Setup changed while planning. Review the updated plan before starting.");
       lastPlan = { definition, plan };
       renderPlan(plan);
       el("plan-section").hidden = false;
-      el("plan-section").scrollIntoView({ behavior: "smooth", block: "start" });
+      el("plan-section").scrollIntoView({ behavior: "auto", block: "start" });
     } catch (err) {
       el("plan-section").hidden = false;
-      el("plan-body").innerHTML = `<p class="notice error">${esc(err.type)}: ${esc(err.message)}</p>`;
+      el("plan-body").innerHTML = `<p class="notice error">${esc(err.type || "Validation")}: ${esc(err.message)}</p>`;
     }
   });
 
@@ -368,6 +399,7 @@ async function initCampaignNew() {
          default maximum ${plan.default_max_runs}</p>
       <div class="table-wrap"><table class="data-table"><thead><tr><th>Solver</th><th>Runs</th><th>Supported</th><th>Installed</th><th>Available</th></tr></thead>
       <tbody>${rows}</tbody></table></div>
+      <details><summary>Full reviewed definition & resource estimates</summary><pre class="json-block">${esc(JSON.stringify(plan, null, 2))}</pre></details>
       ${unavailable ? `<h3>Unavailable combinations</h3><ul>${unavailable}</ul>` : ""}
       ${warnings ? `<h3>Warnings</h3><ul class="notice warn">${warnings}</ul>` : ""}`;
     const over = plan.exceeds_default_max;
@@ -390,6 +422,7 @@ async function initCampaignNew() {
     if (!lastPlan) return;
     const btn = el("run-campaign-btn");
     btn.disabled = true;
+    form.querySelectorAll("input,select,textarea,button").forEach(n=>n.disabled=true);
     setStatus("run-status", "Starting…");
     try {
       const over = lastPlan.plan.exceeds_default_max;
@@ -398,10 +431,12 @@ async function initCampaignNew() {
         override_max_runs: over && el("override-max-runs").checked,
       });
       setStatus("run-status", `Task ${result.task.task_id} ${result.task.status}.`);
+      sessionStorage.setItem("variaq-active-task", result.task.task_id);
       pollTaskUntilDone(result.task.task_id);
     } catch (err) {
-      setStatus("run-status", `${err.type}: ${err.message}`, true);
+      setStatus("run-status", `${err.type || "Validation"}: ${err.message}`, true);
       btn.disabled = false;
+      form.querySelectorAll("input,select,textarea,button").forEach(n=>n.disabled=false); renderSolvers();
     }
   });
 
@@ -410,23 +445,38 @@ async function initCampaignNew() {
       const payload = await apiGet("/campaigns/tasks/" + encodeURIComponent(taskId));
       const task = payload.task;
       const total = task.planned_runs;
-      if (task.status === "completed" || task.status === "failed") {
+      el("run-progress").hidden = false;
+      el("run-progress").max = total || 1;
+      el("run-progress").value = task.completed_runs;
+      if (["completed", "failed", "interrupted"].includes(task.status)) {
+        sessionStorage.removeItem("variaq-active-task");
+        if (el("plan-body").textContent === 'Recovering tracked task status…') {
+          el("plan-body").textContent = 'Stored execution status.';
+        }
+        form.querySelectorAll("input,select,textarea,button").forEach(n=>n.disabled=false); renderSolvers();
         if (task.status === "completed") {
           const cid = task.campaign_id;
-          setStatus("run-status", `Completed: ${task.completed_runs} runs recorded.`);
+          setStatus("run-status", `Execution finished: ${task.completed_runs} runs recorded. Outcomes: ${JSON.stringify(task.result?.status_summary || {})}; skipped: ${task.result?.skipped_runs ?? "see campaign"}.`);
           el("plan-body").insertAdjacentHTML("beforeend",
             `<p><a class="button" href="/campaigns/${esc(cid)}">Open campaign ${esc(shortId(cid))}</a></p>`);
         } else {
-          setStatus("run-status", `Failed: ${task.error ? esc(task.error.message) : "unknown error"}`, true);
+          setStatus("run-status", `${task.status}: ${task.completed_runs} runs preserved. ${task.error ? task.error.message : "unknown error"}`, true);
+          if (task.campaign_id) {
+            el("plan-body").insertAdjacentHTML("beforeend",
+              `<p><a class="button" href="/campaigns/${esc(task.campaign_id)}">Inspect preserved campaign</a></p>`);
+          }
         }
         return;
       }
       setStatus("run-status", `Running… ${task.completed_runs}${total ? " / " + total : ""} runs`);
       setTimeout(() => pollTaskUntilDone(taskId), 1500);
     } catch {
-      setStatus("run-status", "Lost contact with campaign task (server restarted?). The campaign runs already recorded remain in the database.", true);
+      setStatus("run-status", "Task status unavailable. Refresh to reconnect to stored task status. Completed records remain in Campaigns; duplicate submissions do not restart execution.", true);
+      form.querySelectorAll("input,select,textarea,button").forEach(n=>n.disabled=false); renderSolvers();
     }
   }
+  const previousTask = sessionStorage.getItem("variaq-active-task");
+  if(previousTask) { el("plan-section").hidden=false; el("plan-body").textContent='Recovering tracked task status…'; pollTaskUntilDone(previousTask); }
 }
 
 /* -- reports ------------------------------------------------------------------ */
@@ -444,7 +494,7 @@ async function initReports() {
       <td>${r.warnings && r.warnings.length ? `<span title="${esc(r.warnings.join("; "))}">${r.warnings.length}</span>` : "0"}</td></tr>`),
       6, "No reports.");
   } catch (err) {
-    setStatus("reports-status", `${err.type}: ${err.message}`, true);
+    setStatus("reports-status", `${err.type || "Validation"}: ${err.message}`, true);
   }
 }
 
@@ -469,7 +519,7 @@ async function initReportDetail() {
       <td><a href="/api/v1/reports/${esc(report.report_id)}/files/${encodeURIComponent(f.name)}" download>Download</a></td></tr>`),
       4, "No files for this report.");
   } catch (err) {
-    setStatus("report-status", `${err.type}: ${err.message}`, true);
+    setStatus("report-status", `${err.type || "Validation"}: ${err.message}`, true);
   }
 }
 
@@ -506,7 +556,7 @@ async function initCapabilities() {
       el("cap-warnings").innerHTML = data.warnings.map(w => `<li>${esc(w.message)}</li>`).join("");
     }
   } catch (err) {
-    setStatus("capabilities-status", `${err.type}: ${err.message}`, true);
+    setStatus("capabilities-status", `${err.type || "Validation"}: ${err.message}`, true);
   }
 }
 

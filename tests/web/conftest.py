@@ -72,8 +72,9 @@ def web_env(tmp_path):
                 environment={"packages": {"variaq": "0.7.0"}},
             )
         )
-    client = TestClient(create_app(service))
-    return {
+    app = create_app(service)
+    client = TestClient(app)
+    yield {
         "service": service,
         "client": client,
         "db": service.db_path,
@@ -81,10 +82,16 @@ def web_env(tmp_path):
         "reports_dir": service.reports_dir,
         "problem": problem,
     }
+    worker = app.state.tasks._thread
+    if worker is not None:
+        worker.join(timeout=10)
+    app.state.tasks.close()
 
 
 @pytest.fixture
 def empty_web_env(tmp_path):
     base = tmp_path / "empty"
     service = _make_service(base)
-    return {"service": service, "client": TestClient(create_app(service))}
+    app = create_app(service)
+    yield {"service": service, "client": TestClient(app)}
+    app.state.tasks.close()

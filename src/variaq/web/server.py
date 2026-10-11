@@ -13,7 +13,11 @@ def build_app(config: WebConfig):
         problems_dir=config.problems_dir,
         reports_dir=config.reports_dir,
     )
-    return create_app(service)
+    # Explicit non-loopback mode retains the documented trusted-lab boundary.
+    # Default local mode rejects arbitrary Host headers (including DNS rebinding).
+    if config.bind_is_loopback:
+        return create_app(service)
+    return create_app(service, trusted_hosts=("*",))
 
 
 def serve(config: WebConfig) -> int:

@@ -197,6 +197,7 @@ class QAOASearchOutcome:
     parameter_search_seconds: float
     expectation_evaluation_seconds: float
     final_sampling_seconds: float
+    first_backend_evaluation_seconds: float
 
 
 def run_shared_parameter_search(
@@ -215,10 +216,12 @@ def run_shared_parameter_search(
         raise ValidationError("shots must be positive")
 
     warmup_seconds = 0.0
+    first_backend_evaluation_seconds = None
     if warmup:
         warmup_started = perf_counter()
         evaluate_expectation(candidates[0])
         warmup_seconds = perf_counter() - warmup_started
+        first_backend_evaluation_seconds = warmup_seconds
 
     search_started = perf_counter()
     expectation_seconds = 0.0
@@ -226,7 +229,10 @@ def run_shared_parameter_search(
     for index, candidate in enumerate(candidates):
         evaluation_started = perf_counter()
         expectation = float(evaluate_expectation(candidate))
-        expectation_seconds += perf_counter() - evaluation_started
+        evaluation_seconds = perf_counter() - evaluation_started
+        expectation_seconds += evaluation_seconds
+        if first_backend_evaluation_seconds is None:
+            first_backend_evaluation_seconds = evaluation_seconds
         if not math.isfinite(expectation):
             raise ValidationError(
                 f"Backend returned a non-finite expectation for candidate {index}"
@@ -306,6 +312,7 @@ def run_shared_parameter_search(
             parameter_search_seconds=search_seconds,
             expectation_evaluation_seconds=expectation_seconds,
             final_sampling_seconds=sampling_seconds,
+            first_backend_evaluation_seconds=first_backend_evaluation_seconds,
         )
 
     final_evaluation = problem.evaluate(qaoa.bqm.decode_bits(best_feasible_solution))
@@ -328,6 +335,7 @@ def run_shared_parameter_search(
         parameter_search_seconds=search_seconds,
         expectation_evaluation_seconds=expectation_seconds,
         final_sampling_seconds=sampling_seconds,
+        first_backend_evaluation_seconds=first_backend_evaluation_seconds,
     )
 
 

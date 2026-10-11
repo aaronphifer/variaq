@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Any
 
 from variaq import __version__
+from variaq.analysis.comparison_view import comparison_view
 from variaq.analysis.models import AnalysisQuery
 from variaq.analysis.operations import analyze_runs
 from variaq.analysis.reports import export_report, generate_report
@@ -78,8 +79,9 @@ class VariaQService:
                 "campaigns": self.campaign_store.count(),
                 "reports": len(self.list_reports()["reports"]),
             },
+            "fully_recorded_campaigns": self.campaign_store.fully_recorded_count(),
             "recent_runs": self.list_runs(limit=5)["runs"],
-            "recent_campaigns": self.campaign_store.list_campaigns(limit=5),
+            "recent_campaigns": self.list_campaigns(limit=5)["campaigns"],
             "solver_availability": {
                 name: {"available": s["available"], "installed": s["installed"]}
                 for name, s in solvers.items()
@@ -168,25 +170,21 @@ class VariaQService:
         _check_limit_offset(limit, offset)
         if status is not None and status not in {"success", "failed", "unavailable"}:
             raise ValidationError(f"Invalid status filter: {status!r}")
-        campaign_members: set[str] | None = None
         if campaign_id is not None:
             # Validates the campaign exists.
             self.campaign_store.get_campaign(campaign_id)
-            campaign_members = set(self.campaign_store.get_run_ids(campaign_id))
         rows, total = self.store.query_runs(
             problem_type=family,
             solver_name=solver,
             backend_name=backend,
             status=status,
             problem_id=problem_id,
-            run_ids=campaign_members,
+            campaign_id=campaign_id,
             limit=limit,
             offset=offset,
         )
         for row in rows:
-            row["in_campaign"] = bool(
-                campaign_members is not None and row["run_id"] in campaign_members
-            )
+            row["in_campaign"] = campaign_id is not None
         return {"total": total, "limit": limit, "offset": offset, "runs": rows}
 
     def get_run(self, run_id: str) -> dict[str, Any]:
@@ -195,52 +193,168 @@ class VariaQService:
         data = run.to_dict()
         data["campaigns"] = campaigns
         data["rerun_of"] = run.rerun_of
+        data["reproduction_eligible"] = run.result.backend.is_local
         return data
+
+    def reproduce(self, run_id: str, *, web_task_id: str | None = None) -> dict[str, Any]:
+        original = self.store.get(run_id)
+        if not original.result.backend.is_local:
+            raise ValidationError("Only local experiments can be reproduced")
+        return ExperimentRunner(self.store).reproduce(run_id, web_task_id=web_task_id).to_dict()
+
+    def compare(self, selection: dict[str, Any], *, export: bool = False) -> dict[str, Any]:
+        """Analyze one bounded window. Never silently treat a window as the whole campaign."""
+        campaign_id = selection.get("campaign_id")
+        ids = selection.get("run_ids")
+        if bool(campaign_id) == bool(ids):
+            raise ValidationError("Select either one campaign or explicit run IDs")
+        if campaign_id:
+            self.campaign_store.get_campaign(campaign_id)
+        if ids and len(set(ids)) != len(ids):
+            raise ValidationError("Duplicate run IDs are not allowed")
+        if ids:
+            for rid in ids:
+                self.store.get(rid)  # Missing explicit IDs must not silently disappear.
+        rows, total = self.store.query_runs(
+            campaign_id=campaign_id,
+            run_ids=set(ids) if ids else None,
+            problem_id=selection.get("problem_id"),
+            solver_name=selection.get("solver"),
+            backend_name=selection.get("backend"),
+            limit=selection.get("limit", 500),
+            offset=selection.get("offset", 0),
+        )
+        runs = [self.store.get(row["run_id"]) for row in rows]
+        # Size and warmup require canonical problem/configuration data. Apply only
+        # within this explicitly labelled bounded window, before computing references.
+        from variaq.problems.base import problem_from_dict
+        from variaq.solvers.qaoa_shared import QAOA_SOLVER_NAMES
+
+        if selection.get("size") is not None:
+            runs = [
+                run
+                for run in runs
+                if problem_from_dict(run.problem).variable_count == selection["size"]
+            ]
+        if selection.get("warmup"):
+
+            def mode(run: Any) -> str:
+                if run.result.solver_name not in QAOA_SOLVER_NAMES:
+                    return "not_applicable"
+                value = run.solver_config.parameters.get("warmup")
+                return (
+                    "explicit_warmup"
+                    if value is True
+                    else "unwarmed"
+                    if value is False
+                    else "unknown"
+                )
+
+            runs = [run for run in runs if mode(run) == selection["warmup"]]
+        query = AnalysisQuery(
+            campaign_id=campaign_id,
+            run_ids=tuple(run.run_id for run in runs),
+            group_by=("problem_id", "solver", "backend", "parameters.warmup"),
+            include_failed=True,
+            include_unavailable=True,
+        )
+        analysis = analyze_runs(
+            runs, query, scaling_x_metric="problem_size", comparisons=("paired_solvers",)
+        )
+        result = {
+            "analysis": analysis.to_dict(),
+            "instance_summaries": comparison_view(analysis.instances),
+            "total": total,
+            "window_count": len(rows),
+            "selected_count": len(runs),
+            "limit": selection.get("limit", 500),
+            "offset": selection.get("offset", 0),
+            "selection": selection,
+            "repeat_scaling": [
+                {
+                    "problem_id": instance["problem_id"],
+                    "size": problem_from_dict(instance["problem"]).variable_count,
+                    "solver": repeat["solver"],
+                    "backend": repeat["backend"],
+                    "parameters": repeat["parameters"],
+                    "warmup_mode": repeat["warmup_mode"],
+                    "wall": repeat["timing"]["wall_time_seconds"],
+                }
+                for instance in analysis.instances
+                for repeat in instance["repeats"]
+            ],
+        }
+        if export:
+            if not runs:
+                raise ValidationError("No runs selected for export")
+            report = generate_report(analysis, campaign_id=campaign_id)
+            # Presentation exports use fixed artifact names only. In particular,
+            # never follow a planted symlink when regenerating a deterministic ID.
+            for suffix in (
+                ".json",
+                ".md",
+                "_groups.csv",
+                "_scaling.csv",
+                "_runs.csv",
+                "_pairs.csv",
+                "_repeats.csv",
+            ):
+                target = self.reports_dir / f"{report.report_id}{suffix}"
+                if target.is_symlink() or not self._is_within_root(
+                    target, self.reports_dir.resolve()
+                ):
+                    raise ValidationError(
+                        "Requested file is outside the report root or is a symlink"
+                    )
+            existing = self.reports_dir / f"{report.report_id}.json"
+            if existing.exists():
+                saved = json.loads(existing.read_text(encoding="utf-8"))
+                if saved.get("analysis") != analysis.to_dict():
+                    raise ValidationError("Existing report content differs from selected evidence")
+                report.generated_at = saved["generated_at"]
+            export_report(
+                report, self.reports_dir, formats=("json", "csv", "markdown"), overwrite=True
+            )
+            result["report_id"] = report.report_id
+        return result
 
     # -- campaigns -----------------------------------------------------------------
 
     def list_campaigns(self, *, limit: int = 100, offset: int = 0) -> dict[str, Any]:
         _check_limit_offset(limit, offset)
-        # CampaignStore.list_campaigns is newest-first and limit-bounded; we
-        # paginate by fetching a larger window when an offset is requested.
-        rows = self.campaign_store.list_campaigns(limit=MAX_LIMIT)
+        rows = self.campaign_store.list_campaigns(limit=limit, offset=offset)
         decorated = []
         for row in rows:
-            member_rows = self.campaign_store.get_runs_with_status(row["campaign_id"])
-            statuses: dict[str, int] = {}
-            for member in member_rows:
-                statuses[member["status"]] = statuses.get(member["status"], 0) + 1
+            stats = self.campaign_store.run_statistics(row["campaign_id"])
             definition = self.campaign_store.get_campaign(row["campaign_id"])
             decorated.append(
                 {
                     **row,
                     "requested_runs": definition.requested_runs,
-                    "completed_runs": len(member_rows),
-                    "status_counts": statuses,
+                    "completed_runs": stats["completed_runs"],
+                    "status_counts": stats["status_counts"],
                 }
             )
         return {
-            "total": len(decorated),
+            "total": self.campaign_store.count(),
             "limit": limit,
             "offset": offset,
-            "campaigns": decorated[offset : offset + limit],
+            "campaigns": decorated,
         }
 
-    def get_campaign(self, campaign_id: str) -> dict[str, Any]:
+    def get_campaign(
+        self, campaign_id: str, *, limit: int | None = None, offset: int = 0
+    ) -> dict[str, Any]:
+        if limit is not None:
+            _check_limit_offset(limit, offset)
         campaign = self.campaign_store.get_campaign(campaign_id)
-        members = self.campaign_store.get_runs_with_status(campaign_id)
-        statuses: dict[str, int] = {}
-        solvers: dict[str, int] = {}
-        for member in members:
-            statuses[member["status"]] = statuses.get(member["status"], 0) + 1
-            solvers[member["solver_name"]] = solvers.get(member["solver_name"], 0) + 1
+        members = self.campaign_store.get_runs_with_status(campaign_id, limit=limit, offset=offset)
+        stats = self.campaign_store.run_statistics(campaign_id)
         return {
             "definition": campaign.to_dict(),
             "campaign_id": campaign_id,
             "requested_runs": campaign.requested_runs,
-            "completed_runs": len(members),
-            "status_counts": statuses,
-            "solver_breakdown": solvers,
+            **stats,
             "runs": members,
         }
 
@@ -258,6 +372,7 @@ class VariaQService:
         max_runs: int = DEFAULT_MAX_RUNS,
         on_run_recorded: Any | None = None,
         should_abort: Any | None = None,
+        web_task_id: str | None = None,
     ) -> dict[str, Any]:
         """Execute a campaign. Must be called from a worker thread by the web app."""
         campaign = ExperimentCampaign.from_dict(definition)
@@ -273,6 +388,7 @@ class VariaQService:
             override_max_runs=override_max_runs,
             on_run_recorded=on_run_recorded,
             should_abort=should_abort,
+            web_task_id=web_task_id,
         )
 
     # -- analysis ------------------------------------------------------------------
@@ -381,6 +497,9 @@ class VariaQService:
             ".md": "markdown",
             "_groups.csv": "csv",
             "_scaling.csv": "csv",
+            "_runs.csv": "csv",
+            "_pairs.csv": "csv",
+            "_repeats.csv": "csv",
             "_scaling.png": "plot",
         }
         for suffix, report_format in suffixes.items():
@@ -461,6 +580,7 @@ class VariaQService:
             run_ids=tuple(run_ids),
             group_by=tuple(group_by or ("problem_id", "solver")),
             include_failed=True,
+            include_unavailable=True,
         )
         analysis = analyze_runs(
             runs,

@@ -13,7 +13,6 @@ from importlib import metadata
 from typing import Any
 
 from variaq import __version__
-from variaq.errors import BackendUnavailableError
 from variaq.serialization import OUTPUT_SCHEMA_VERSION, StructuredWarning
 from variaq.solvers.base import get_solver, solver_names, solver_supported_families
 
@@ -61,31 +60,26 @@ def _package_version(name: str) -> str | None:
         return None
 
 
-def _solver_capability(name: str) -> CapabilityEntry:
+def _solver_capability(name: str, cudaq_info: dict[str, Any] | None = None) -> CapabilityEntry:
     supported = name in solver_names()
     installed = False
     available = False
     reason: str | None = None
     try:
-        solver = get_solver(name)
+        get_solver(name)  # Static adapter lookup; never execute a solver for discovery.
         installed = True
-        # Use a tiny synthetic problem to test availability without heavy work.
-        if name in {"qaoa", "cudaq-cpu", "cudaq-gpu"}:
-            from variaq.models import SolverConfig
-            from variaq.problems.maxcut import MaxCutProblem
+        if name == "qaoa":
+            from variaq.solvers.qiskit_qaoa import _load_quantum_dependencies
 
-            try:
-                solver.solve(
-                    MaxCutProblem.from_edges(2, [(0, 1)]),
-                    SolverConfig(seed=0, parameters={"optimizer_trials": 1, "shots": 1}),
-                )
-                available = True
-            except BackendUnavailableError as exc:
-                reason = str(exc)
-            except Exception as exc:
-                # Missing dependency / limit / runtime problem means installed but
-                # not available for this environment.
-                reason = f"{type(exc).__name__}: {exc}"
+            installed = _package_version("qiskit") is not None
+            _load_quantum_dependencies()
+            available = True
+        elif name in {"cudaq-cpu", "cudaq-gpu"}:
+            info = cudaq_info if cudaq_info is not None else _cudaq_targets()
+            installed = info["installed"]
+            key = "qpp_cpu_available" if name == "cudaq-cpu" else "nvidia_available"
+            available = bool(info[key])
+            reason = None if available else info.get("reason") or "CUDA-Q target is unavailable"
         else:
             available = True
     except Exception as exc:
@@ -199,7 +193,7 @@ def gather_capabilities() -> dict[str, Any]:
             {"name": "subset-selection", "supported": True},
             {"name": "graph-partition", "supported": True},
         ],
-        "solvers": [_solver_capability(name).to_dict() for name in solver_names()],
+        "solvers": [_solver_capability(name, cudaq_info).to_dict() for name in solver_names()],
         "frameworks": [
             FrameworkInfo(
                 name="qiskit", version=qiskit_version, installed=qiskit_version is not None
@@ -221,6 +215,9 @@ def gather_capabilities() -> dict[str, Any]:
                 },
             },
         ],
+        "availability_scope": (
+            "dependency_import_target_and_device_discovery_without_solver_execution"
+        ),
         "physical_qpu": physical_qpu,
         "warnings": [warning.to_dict() for warning in warnings],
     }

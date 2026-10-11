@@ -13,6 +13,19 @@ from variaq.cli import main
 
 
 class CapabilityTests(unittest.TestCase):
+    def test_discovery_never_executes_a_solver_or_selects_cudaq_target(self) -> None:
+        with (
+            mock.patch(
+                "variaq.solvers.qiskit_qaoa.QiskitQAOASolver.solve", side_effect=AssertionError
+            ),
+            mock.patch(
+                "variaq.solvers.cudaq_qaoa._CudaQQAOASolver.solve", side_effect=AssertionError
+            ),
+            mock.patch("variaq.solvers.cudaq_qaoa._selected_target", side_effect=AssertionError),
+        ):
+            data = gather_capabilities()
+        self.assertIn("without_solver_execution", data["availability_scope"])
+
     def test_gather_capabilities_includes_schema_version(self) -> None:
         data = gather_capabilities()
         self.assertEqual(data["variaq"]["output_schema_version"], "1")

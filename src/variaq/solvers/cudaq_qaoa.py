@@ -45,9 +45,12 @@ def _load_cudaq() -> Any:
 
 
 @contextmanager
-def _selected_target(cudaq: Any, target_name: str) -> Any:
+def _selected_target(cudaq: Any, target_name: str, precision: str | None = None) -> Any:
     previous = cudaq.get_target()
-    cudaq.set_target(target_name)
+    if target_name == "nvidia" and precision is not None:
+        cudaq.set_target(target_name, option=precision)
+    else:
+        cudaq.set_target(target_name)
     try:
         yield
     finally:
@@ -78,10 +81,14 @@ def _optional_gpu_metadata() -> dict[str, Any]:
     for line in result.stdout.splitlines():
         values = [value.strip() for value in line.split(",")]
         if len(values) == 3:
+            try:
+                memory_mib = int(values[1])
+            except ValueError:
+                memory_mib = None
             devices.append(
                 {
                     "model": values[0],
-                    "total_memory_mib": int(values[1]),
+                    "total_memory_mib": memory_mib,
                     "driver_version": values[2],
                 }
             )
@@ -197,7 +204,9 @@ class _CudaQQAOASolver(Solver):
             if precision != "fp64":
                 raise ValidationError("qpp-cpu supports VariaQ's fp64 mode only")
             return precision, "qpp-cpu"
-        return precision, "nvidia" if precision == "fp32" else "nvidia-fp64"
+        # The deprecated nvidia-fp64 alias prints native diagnostics to stdout,
+        # corrupting schema-v1 JSON. Select precision through supported options.
+        return precision, "nvidia"
 
     def solve(self, problem: ProblemInstance, config: SolverConfig) -> SolveResult:
         self.check_family(problem)
@@ -263,7 +272,7 @@ class _CudaQQAOASolver(Solver):
                     provider="cudaq",
                 )
 
-        with _selected_target(cudaq, target_name):
+        with _selected_target(cudaq, target_name, precision):
             backend = CudaQStatevectorBackend(cudaq, bqm, p, config.seed)
             initialization_seconds = perf_counter() - initialization_started
             outcome = run_shared_parameter_search(
@@ -296,6 +305,7 @@ class _CudaQQAOASolver(Solver):
         metrics: dict[str, Any] = {
             "framework": "cudaq",
             "target_name": target_name,
+            "target_options": {"precision": precision},
             "target_type": f"{self.target_kind.upper()} simulator",
             "floating_point_precision": precision,
             "simulator_backend": target_name,
@@ -321,6 +331,10 @@ class _CudaQQAOASolver(Solver):
             "best_solution_energy": outcome.best_solution_energy,
             "best_infeasible_energy": outcome.best_infeasible_energy,
             "backend_initialization_seconds": initialization_seconds,
+            "backend_initialization_scope": "imports_target_selection_kernel_construction",
+            "first_backend_evaluation_seconds": outcome.first_backend_evaluation_seconds,
+            "first_backend_evaluation_scope": "first_observe_including_lazy_backend_setup",
+            "first_backend_evaluation_overlaps": "warmup_or_expectation_evaluation_seconds",
             "warmup_seconds": outcome.warmup_seconds,
             "parameter_search_seconds": outcome.parameter_search_seconds,
             "expectation_evaluation_seconds": outcome.expectation_evaluation_seconds,

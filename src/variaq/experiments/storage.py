@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import math
 import sqlite3
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -198,6 +199,7 @@ class ExperimentStore:
         status: str | None = None,
         problem_id: str | None = None,
         run_ids: set[str] | frozenset[str] | None = None,
+        campaign_id: str | None = None,
         limit: int = 50,
         offset: int = 0,
     ) -> tuple[list[dict[str, Any]], int]:
@@ -234,6 +236,12 @@ class ExperimentStore:
             placeholders = ", ".join("?" for _ in run_ids)
             clauses.append(f"run_id IN ({placeholders})")
             params.extend(sorted(run_ids))
+        if campaign_id is not None:
+            clauses.append(
+                "EXISTS (SELECT 1 FROM campaign_runs cr "
+                "WHERE cr.run_id = runs.run_id AND cr.campaign_id = ?)"
+            )
+            params.append(campaign_id)
         where = f" WHERE {' AND '.join(clauses)}" if clauses else ""
         with self._connection() as connection:
             total = int(
@@ -313,16 +321,28 @@ class ExperimentStore:
         return json.loads(row["definition_json"])
 
     def exact_objective(self, problem_id: str) -> float | None:
+        """Return a consistent canonical feasible exact reference, for either sense."""
         with self._connection() as connection:
-            row = connection.execute(
+            rows = connection.execute(
                 """
-                SELECT MAX(objective) AS objective FROM runs
+                SELECT record_json FROM runs
                 WHERE problem_id = ? AND solver_name = 'exact'
                   AND status = 'success' AND feasible = 1
                 """,
                 (problem_id,),
-            ).fetchone()
-        return None if row is None else row["objective"]
+            ).fetchall()
+        objectives: set[float] = set()
+        for row in rows:
+            run = ExperimentRun.from_dict(json.loads(row["record_json"]))
+            problem = problem_from_dict(run.problem)
+            if run.result.solution is None:
+                continue
+            evaluation = problem.evaluate(run.result.solution)
+            if evaluation.feasible and evaluation.objective is not None:
+                objective = float(evaluation.objective)
+                if math.isfinite(objective):
+                    objectives.add(objective)
+        return next(iter(objectives)) if len(objectives) == 1 else None
 
     def count(self) -> int:
         with self._connection() as connection:

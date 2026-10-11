@@ -7,6 +7,80 @@ import json
 import pytest
 
 
+@pytest.mark.parametrize(
+    "override",
+    [
+        {"parameters": "malformed"},
+        {"seed": {}},
+        {"unknown": 1},
+        {"parameters": {"shots": 1000000000}},
+    ],
+)
+def test_malformed_or_unbounded_solver_override(web_env, override):
+    definition = {
+        "name": "invalid",
+        "family": "maxcut",
+        "problem_sizes": [4],
+        "problem_seeds": [1],
+        "solvers": ["exact"],
+        "solver_config": {"exact": override},
+    }
+    response = web_env["client"].post("/api/v1/campaigns/plan", json={"definition": definition})
+    assert response.status_code == 422
+
+
+def test_web_generation_dimensions_bounded(web_env):
+    definition = {
+        "name": "oversized",
+        "family": "maxcut",
+        "problem_sizes": [1000000000],
+        "problem_seeds": [1],
+        "solvers": ["exact"],
+    }
+    assert (
+        web_env["client"]
+        .post("/api/v1/campaigns/plan", json={"definition": definition})
+        .status_code
+        == 422
+    )
+
+
+def test_loopback_api_rejects_forged_host_and_cross_origin_execution(web_env):
+    client = web_env["client"]
+    assert (
+        client.get("/api/v1/health", headers={"Host": "rebind.attacker.example"}).status_code == 400
+    )
+    definition = {
+        "name": "cross-site",
+        "family": "maxcut",
+        "problem_sizes": [4],
+        "problem_seeds": [1],
+        "solvers": ["exact"],
+    }
+    for headers in ({"Origin": "https://attacker.example"}, {"Sec-Fetch-Site": "cross-site"}):
+        response = client.post(
+            "/api/v1/campaigns/run", json={"definition": definition}, headers=headers
+        )
+        assert response.status_code == 403
+    assert web_env["service"].campaign_store.count() == 0
+    assert (
+        client.post(
+            "/api/v1/campaigns/plan",
+            json={"definition": definition},
+            headers={"Origin": "http://testserver"},
+        ).status_code
+        == 200
+    )
+
+
+def test_ipv6_loopback_and_malformed_origin(web_env):
+    client = web_env["client"]
+    assert client.get("/api/v1/health", headers={"Host": "[::1]:8701"}).status_code == 200
+    assert client.get("/api/v1/health", headers={"Host": "localhost:bad"}).status_code == 400
+    response = client.post("/api/v1/campaigns/run", json={}, headers={"Origin": "http://["})
+    assert response.status_code == 403
+
+
 def test_default_bind_is_loopback():
     from variaq.web.config import DEFAULT_HOST, WebConfig
 

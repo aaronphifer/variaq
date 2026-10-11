@@ -69,3 +69,13 @@ HTMX dependency for the handful of dynamic regions; charts need real JS anyway.
 - Campaign task tracking is intentionally in-process and single-flight; a richer
   progress model can be added behind the same `/api/v1/campaigns/tasks/`
   endpoints without breaking the UI.
+
+## v0.8 recovery update
+
+Execution remains sequential in one server thread. An adjacent OS-held file lock
+allows only one web worker per database, and additive SQLite task snapshots retain
+request identity across restarts. Each campaign attempt is persisted before the
+next solver starts. Recovery reconciles committed records with campaign membership
+and marks unfinished tasks interrupted; it never resumes or retries them.
+Browser refresh reconnects to the stored task. Native calls cannot be safely
+cancelled in process. See [candidate recovery notes](releases/v0.8.0-hardening.md).

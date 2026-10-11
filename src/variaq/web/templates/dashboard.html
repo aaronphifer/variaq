@@ -1,23 +1,21 @@
 {% extends "base.html" %}
 {% block title %}Dashboard · VariaQ{% endblock %}
 {% block content %}
-<section class="page-head">
-  <h1>Dashboard</h1>
-  <p class="muted">Local VariaQ research state on this machine.</p>
-</section>
+<section class="page-head page-head-row"><div><div class="eyebrow">Scientific benchmarking · Local workspace</div>
+  <h1>Your research, in perspective.</h1>
+  <p class="muted">Explore experiments, compare solver quality, and trace every result back to its inputs.</p>
+</div><div class="actions"><a class="button primary" href="/campaigns/new">New Experiment</a><a class="button" href="/compare">Compare Results</a></div></section>
 <div id="dashboard-status" class="notice muted" role="status">Loading…</div>
 <div id="dashboard" hidden>
   <section class="stat-grid" aria-label="Activity totals">
-    <div class="stat"><span class="stat-value" id="stat-problems">0</span><span class="stat-label">Problems</span></div>
-    <div class="stat"><span class="stat-value" id="stat-runs">0</span><span class="stat-label">Runs</span></div>
+    <div class="stat"><span class="stat-value" id="stat-completed">—</span><span class="stat-label">Fully recorded campaigns</span><span class="form-help">Membership count meets requested runs; includes failed attempts and reruns.</span><span id="stat-problems" hidden></span></div>
+    <div class="stat"><span class="stat-value" id="stat-runs">0</span><span class="stat-label">Total experiments</span></div>
     <div class="stat"><span class="stat-value" id="stat-campaigns">0</span><span class="stat-label">Campaigns</span></div>
     <div class="stat"><span class="stat-value" id="stat-reports">0</span><span class="stat-label">Reports</span></div>
   </section>
 
   <p id="empty-hint" class="empty-state" hidden>
-    No experiments yet. Plan a campaign from
-    <a href="/campaigns/new">Campaigns → New campaign</a>, or use the CLI:
-    <code>variaq problem generate</code> then <code>variaq campaign run</code>.
+    Start with a small classical benchmark. Choose a problem, keep the exact and heuristic defaults, review your plan, and compare the recorded results. <a href="/campaigns/new">Create your first experiment →</a>
   </p>
 
   <div class="grid-2col">
@@ -25,7 +23,7 @@
       <h2 id="recent-runs-h">Recent runs</h2>
       <div class="table-wrap">
         <table class="data-table" id="recent-runs-table">
-          <thead><tr><th>Run</th><th>Solver</th><th>Status</th><th>Objective</th><th>Wall s</th></tr></thead>
+          <thead><tr><th>Run</th><th>Solver</th><th>Status</th><th>Reported objective</th><th>Wall s</th></tr></thead>
           <tbody></tbody>
         </table>
       </div>

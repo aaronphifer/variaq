@@ -72,7 +72,12 @@ class CampaignStore:
             ).fetchone()
             if existing is not None:
                 existing_definition = json.loads(existing["definition_json"])
-                if existing_definition != campaign.to_dict():
+                incoming_definition = campaign.to_dict()
+                # Creation time is not part of deterministic campaign identity.
+                # Preserve the original definition while appending new executions.
+                existing_definition.pop("created_at", None)
+                incoming_definition.pop("created_at", None)
+                if existing_definition != incoming_definition:
                     raise DuplicateRunError(
                         f"Campaign ID {campaign_id} already exists with different content"
                     )
@@ -93,14 +98,14 @@ class CampaignStore:
             raise ValidationError(f"Campaign not found: {campaign_id}")
         return ExperimentCampaign.from_dict(json.loads(row["definition_json"]))
 
-    def list_campaigns(self, limit: int = 100) -> list[dict[str, Any]]:
+    def list_campaigns(self, limit: int = 100, offset: int = 0) -> list[dict[str, Any]]:
         if limit < 1 or limit > 1000:
             raise ValidationError("Campaign list limit must be between 1 and 1000")
         with self._connection() as connection:
             rows = connection.execute(
                 "SELECT campaign_id, name, family, created_at FROM campaigns "
-                "ORDER BY created_at DESC, rowid DESC LIMIT ?",
-                (limit,),
+                "ORDER BY created_at DESC, rowid DESC LIMIT ? OFFSET ?",
+                (limit, offset),
             ).fetchall()
         return [dict(row) for row in rows]
 
@@ -131,14 +136,37 @@ class CampaignStore:
             ).fetchall()
         return [row["run_id"] for row in rows]
 
-    def get_runs_with_status(self, campaign_id: str) -> list[dict[str, Any]]:
+    def get_runs_with_status(
+        self, campaign_id: str, *, limit: int | None = None, offset: int = 0
+    ) -> list[dict[str, Any]]:
         with self._connection() as connection:
+            suffix = " LIMIT ? OFFSET ?" if limit is not None else ""
+            parameters = (campaign_id, limit, offset) if limit is not None else (campaign_id,)
             rows = connection.execute(
                 "SELECT run_id, status, solver_name, problem_id, created_at "
-                "FROM campaign_runs WHERE campaign_id = ? ORDER BY created_at",
-                (campaign_id,),
+                "FROM campaign_runs WHERE campaign_id = ? ORDER BY created_at" + suffix,
+                parameters,
             ).fetchall()
         return [dict(row) for row in rows]
+
+    def run_statistics(self, campaign_id: str) -> dict[str, Any]:
+        """Aggregate membership without loading every run into presentation memory."""
+        with self._connection() as connection:
+            rows = connection.execute(
+                "SELECT status, solver_name, COUNT(*) AS n FROM campaign_runs "
+                "WHERE campaign_id = ? GROUP BY status, solver_name",
+                (campaign_id,),
+            ).fetchall()
+        statuses: dict[str, int] = {}
+        solvers: dict[str, int] = {}
+        for row in rows:
+            statuses[row["status"]] = statuses.get(row["status"], 0) + row["n"]
+            solvers[row["solver_name"]] = solvers.get(row["solver_name"], 0) + row["n"]
+        return {
+            "completed_runs": sum(statuses.values()),
+            "status_counts": statuses,
+            "solver_breakdown": solvers,
+        }
 
     def campaigns_for_run(self, run_id: str) -> list[dict[str, Any]]:
         with self._connection() as connection:
@@ -167,3 +195,17 @@ class CampaignStore:
     def count(self) -> int:
         with self._connection() as connection:
             return int(connection.execute("SELECT COUNT(*) FROM campaigns").fetchone()[0])
+
+    def fully_recorded_count(self) -> int:
+        """Membership coverage, not a claim of successful or recoverable execution."""
+        with self._connection() as connection:
+            rows = connection.execute(
+                "SELECT c.definition_json, COUNT(cr.run_id) AS recorded FROM campaigns c "
+                "LEFT JOIN campaign_runs cr ON cr.campaign_id = c.campaign_id "
+                "GROUP BY c.campaign_id"
+            ).fetchall()
+        return sum(
+            row["recorded"]
+            >= ExperimentCampaign.from_dict(json.loads(row["definition_json"])).requested_runs
+            for row in rows
+        )

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from variaq.analysis.paired import paired_analysis
 from variaq.models import ExperimentRun, SolveResult, SolveStatus
 from variaq.serialization import OUTPUT_SCHEMA_VERSION, StructuredWarning
 
@@ -117,33 +118,28 @@ def quantum_comparison_json_data(problem: Any, runs: list[ExperimentRun]) -> dic
     base = benchmark_json_data(problem, runs)
     successful = [run for run in runs if run.result.status is SolveStatus.SUCCESS]
     unavailable = [run for run in runs if run.result.status is SolveStatus.UNAVAILABLE]
-    max_delta = 0.0
-    identical_candidates = True
-    reference_digest: str | None = None
-    if successful:
-        reference_digest = str(
-            successful[0].result.backend.metrics.get("candidate_parameter_digest")
-        )
-        digests = {
-            str(run.result.backend.metrics.get("candidate_parameter_digest")) for run in successful
+    _, paired = paired_analysis(runs)
+    paired_repeats = [
+        {
+            "benchmark_id": p["benchmark_id"],
+            "repeat_key": p["repeat_key"],
+            "left_run_id": p["left_run_id"],
+            "right_run_id": p["right_run_id"],
+            **p["numerical_correctness"],
         }
-        identical_candidates = len(digests) <= 1
-        reference_expectations = list(
-            successful[0].result.backend.metrics.get("candidate_expectations", [])
-        )
-        for run in successful[1:]:
-            candidate = list(run.result.backend.metrics.get("candidate_expectations", []))
-            if len(candidate) == len(reference_expectations):
-                max_delta = max(
-                    max_delta,
-                    max(
-                        (
-                            abs(float(a) - float(b))
-                            for a, b in zip(reference_expectations, candidate, strict=True)
-                        ),
-                        default=0.0,
-                    ),
-                )
+        for p in paired.pairs
+    ]
+    deltas = [
+        p["max_expectation_delta"] for p in paired_repeats if p["max_expectation_delta"] is not None
+    ]
+    max_delta = max(deltas) if deltas else None
+    controls = [p["matched_controls"] for p in paired_repeats if p["matched_controls"] is not None]
+    identical_candidates = all(controls) if controls else None
+    reference_digest = (
+        successful[0].result.backend.metrics.get("candidate_parameter_digest")
+        if successful
+        else None
+    )
     best_indices = {
         run.result.solver_name: run.result.backend.metrics.get("best_parameter_index")
         for run in successful
@@ -166,6 +162,9 @@ def quantum_comparison_json_data(problem: Any, runs: list[ExperimentRun]) -> dic
             "candidate_parameter_digest": reference_digest,
             "identical_candidate_parameters": identical_candidates,
             "max_expectation_delta": max_delta,
+            "expectation_comparison_count": len(deltas),
+            "expectation_comparison_reason": None if deltas else "No complete matched backend pair",
+            "paired_repeats": paired_repeats,
             "best_parameter_indices": best_indices,
             "precision": precision_map,
             "backend_target": target_map,

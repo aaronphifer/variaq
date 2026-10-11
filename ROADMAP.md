@@ -83,9 +83,46 @@ These are directions, not implemented features or delivery commitments.
 - analysis-visualization charts driven by structured `AnalysisResult` data;
 - safe report downloads confined to known report artifacts.
 
-## v0.8 and later — later exploration
+## v0.8 — reproducible scientific benchmarking (local candidate)
 
-Future candidates after 0.7 (none committed): richer interactive charts on the
+First development slice (implemented in this checkout, not a release):
+
+- small opt-in MaxCut matrices over sizes, graph seeds, solver repeats, and local
+  classical/Qiskit/CUDA-Q backends with existing resource guards;
+- authoritative per-instance quality and exact-reference gaps, feasibility,
+  conservative repeat pairing, source-run provenance, and repeat variability;
+- complete-call wall time and available compute/setup/warmup layers, with explicit
+  null/reason metadata for missing measurements and unverified cold starts;
+- separate numerical backend agreement from speed and sampled quality;
+- additive schema-v1 JSON, CSV, and Markdown reporting, documented methodology,
+  and dependency-free regression coverage.
+
+Web interface development slice (implemented in the candidate):
+
+- cohesive dark-first responsive dashboard and navigation;
+- guided experiment recipes, capability-aware solver selection, advanced QAOA
+  configuration, plan invalidation, and local task recovery messaging;
+- bounded comparison workspace over authoritative Python instance/repeat data,
+  explicit pairing, null reasons, timing scopes, per-configuration scaling,
+  and selected JSON/CSV/Markdown report exports;
+- canonical run measurements, configuration/environment provenance, and local
+  reproduction with saved lineage;
+- keyboard-accessible scientific explanations and alternative chart data tables.
+
+Durable SQLite task snapshots and recovery of interrupted web tasks are implemented.
+Duplicate web submissions reconnect to the original task, and campaign attempts are
+saved before the next solver call. CLI reruns remain explicit new executions.
+See [web benchmarking workflow](docs/benchmarking-ui.md) and
+[candidate hardening](docs/releases/v0.8.0-hardening.md). Hard native-call cancellation
+remains deferred.
+
+Fresh-process GPU cold-start verification, trustworthy peak memory telemetry,
+confidence intervals, and interrupting hung native calls remain future design work.
+See [scientific benchmark methodology](docs/scientific-benchmarks.md).
+
+## After v0.8 — later exploration
+
+Future candidates (none committed): richer interactive charts on the
 existing API, campaign execution progress refinement, stronger classical
 baselines evaluated only where they add scientific value, Graph Partition
 quantum research, and optional authenticated LAN mode for trusted labs.

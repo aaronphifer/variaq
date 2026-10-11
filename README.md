@@ -11,6 +11,14 @@ measure when quantum methods are useful, competitive, or impractical.
 
 **Classical · GPU · Quantum**
 
+## Reproducible scientific benchmarks (v0.8 candidate)
+
+The first v0.8 slice adds two bounded, opt-in MaxCut campaign matrices and
+per-instance paired analysis via `--compare paired_solvers`. Use the existing
+campaign and reporting commands; see [methodology and examples](docs/scientific-benchmarks.md).
+GPU availability and missing timing data are reported explicitly. Simulator
+results do not establish quantum advantage. The local candidate package is `0.8.0rc1`; no release is published.
+
 ## Why VariaQ exists
 
 Cross-framework comparisons are easy to distort accidentally. Different
@@ -34,7 +42,7 @@ physical QPU.
 
 ## Current capabilities
 
-VariaQ 0.7 supports domain-neutral optimization problem families:
+VariaQ 0.8 supports domain-neutral optimization problem families:
 
 - **MaxCut** — weighted graph partitioning into two sets.
 - **Assignment** — tasks/resources with scores, costs, capacities, demands, and
@@ -54,7 +62,7 @@ support:
   depends on the installed quantum backend and the binary-variable budget (see
   `variaq capabilities --json`).
 - **Graph Partitioning**: BQM lowering is implemented and tested, but quantum
-  support is experimental and not advertised for 0.7.0.
+  support is experimental in the v0.8 candidate.
 
 Solvers:
 
@@ -62,7 +70,7 @@ Solvers:
 - seeded multistart local-search heuristic,
 - Qiskit local statevector QAOA,
 - CUDA-Q `qpp-cpu` QAOA,
-- CUDA-Q `nvidia` and `nvidia-fp64` adapters when compatible hardware exists.
+- CUDA-Q `nvidia` adapters with explicit FP32/FP64 precision when compatible hardware exists.
 
 Cross-cutting features:
 
@@ -287,3 +295,10 @@ failure-handling, and remote-execution safety validation where applicable.
 ## License
 
 VariaQ is licensed under the [Apache License 2.0](LICENSE).
+
+The v0.8 candidate includes a guided experiment workflow
+and scientific comparison workspace. See [benchmarking UI](docs/benchmarking-ui.md)
+for evidence selection, timing scopes, exports, reproduction, and current limits.
+
+See [candidate hardening and upgrade notes](docs/releases/v0.8.0-hardening.md) for
+recovery, compatibility, security boundaries and current verification.

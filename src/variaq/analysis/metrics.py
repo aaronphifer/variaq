@@ -54,10 +54,11 @@ def best_known_objective(runs: Sequence[ExperimentRun]) -> tuple[float | None, s
         for r in runs
         if r.result.solver_name == "exact"
         and r.result.status is SolveStatus.SUCCESS
+        and r.result.feasible
         and r.result.objective is not None
     ]
     if exact:
-        return max(exact), "exact_optimum"
+        return _best(_dominant_sense(runs), exact), "exact_optimum"
     feasible = [
         r.result.objective
         for r in runs
@@ -101,9 +102,9 @@ def absolute_gap(best: float, objective: float, sense: OptimizationSense) -> flo
     return max(0.0, objective - best)
 
 
-def relative_gap(best: float, objective: float) -> float:
+def relative_gap(best: float, objective: float) -> float | None:
     if best == 0.0:
-        return 0.0
+        return 0.0 if objective == best else None
     return abs(best - objective) / abs(best) * 100.0
 
 

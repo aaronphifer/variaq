@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
+from statistics import median
 from typing import Any
 
 from variaq.analysis.metrics import (
@@ -10,7 +11,6 @@ from variaq.analysis.metrics import (
     _dominant_sense,
     _worst,
     approximation_ratio,
-    best_known_objective,
     extract_field,
     make_repeat_summary,
     relative_gap,
@@ -26,6 +26,7 @@ from variaq.analysis.models import (
     ScalingPoint,
     TimingSummary,
 )
+from variaq.analysis.paired import _evaluation, paired_analysis
 from variaq.models import ExperimentRun, OptimizationSense, SolveStatus
 
 
@@ -54,10 +55,8 @@ def _group_key(run: ExperimentRun, group_by: tuple[str, ...]) -> dict[str, Any]:
     return key
 
 
-def _make_quality(runs: list[ExperimentRun]) -> QualitySummary:
-    successful = [
-        r for r in runs if r.result.status is SolveStatus.SUCCESS and r.result.objective is not None
-    ]
+def _make_quality(runs: list[ExperimentRun], reference_runs: list[ExperimentRun]) -> QualitySummary:
+    successful = [r for r in runs if _evaluation(r)[0] is not None and _evaluation(r)[1]]
     count = len(successful)
     if count == 0:
         return QualitySummary(
@@ -70,39 +69,43 @@ def _make_quality(runs: list[ExperimentRun]) -> QualitySummary:
             success_at_optimum_rate=None,
             approximation_ratio=None,
         )
-    objectives = [float(r.result.objective) for r in successful]
+    objectives = [float(_evaluation(r)[0]) for r in successful]
     sense = _dominant_sense(successful)
-    best, source = best_known_objective(successful)
-    if best is None:
-        best = _best(sense, objectives)
-    gaps = [relative_gap(float(best), obj) for obj in objectives]
-    successes = [
-        1
-        for r in successful
-        if r.result.best_known_objective is not None
-        and r.result.objective is not None
-        and abs(float(r.result.objective) - float(r.result.best_known_objective)) <= 1e-9
-    ]
+    references: dict[str, set[float]] = defaultdict(set)
+    for run in reference_runs:
+        obj, feasible, _ = _evaluation(run)
+        if run.result.solver_name == "exact" and feasible and obj is not None:
+            references[run.result.problem_id].add(obj)
+    gaps: list[float] = []
+    successes: list[bool] = []
     ratios: list[float] = []
-    for obj in objectives:
-        ratio = approximation_ratio(best, obj, sense)
-        if ratio is not None and best is not None:
-            ratios.append(float(ratio))
+    for run, obj in zip(successful, objectives, strict=True):
+        refs = references[run.result.problem_id]
+        if len(refs) != 1:
+            continue
+        best = next(iter(refs))
+        gap = relative_gap(best, obj)
+        if gap is not None:
+            gaps.append(gap)
+        successes.append(abs(obj - best) <= 1e-9)
+        ratio = approximation_ratio(best, obj, _dominant_sense([run]))
+        if ratio is not None:
+            ratios.append(ratio)
     return QualitySummary(
         count=count,
         best_objective=_best(sense, objectives),
         worst_objective=_worst(sense, objectives),
         mean_objective=sum(objectives) / len(objectives),
-        median_objective=sorted(objectives)[len(objectives) // 2] if objectives else None,
+        median_objective=median(objectives),
         mean_gap_percent=sum(gaps) / len(gaps) if gaps else None,
-        success_at_optimum_rate=sum(successes) / len(successful) if successful else None,
+        success_at_optimum_rate=sum(successes) / len(successes) if successes else None,
         approximation_ratio=sum(ratios) / len(ratios) if ratios else None,
     )
 
 
 def _make_feasibility(runs: list[ExperimentRun]) -> FeasibilitySummary:
-    feasible_runs = [r for r in runs if r.result.feasible]
-    infeasible_runs = [r for r in runs if not r.result.feasible]
+    feasible_runs = [r for r in runs if _evaluation(r)[1] is True]
+    infeasible_runs = [r for r in runs if _evaluation(r)[1] is False]
     feasible_sample_count: int | None = None
     infeasible_sample_count: int | None = None
     rates: list[float] = []
@@ -123,15 +126,16 @@ def _make_feasibility(runs: list[ExperimentRun]) -> FeasibilitySummary:
                 rates.append(rate)
                 if int(fsc) == 0:
                     zero_feasible += 1
-        if r.result.feasible and r.result.objective is not None:
+        objective, feasible, _ = _evaluation(r)
+        if feasible and objective is not None:
             if best_feasible is None:
-                best_feasible = float(r.result.objective)
+                best_feasible = objective
             else:
                 sense = _dominant_sense([r])
                 if sense is OptimizationSense.MAXIMIZE:
-                    best_feasible = max(best_feasible, float(r.result.objective))
+                    best_feasible = max(best_feasible, objective)
                 else:
-                    best_feasible = min(best_feasible, float(r.result.objective))
+                    best_feasible = min(best_feasible, objective)
         bie = r.result.backend.metrics.get("best_infeasible_energy")
         if bie is not None:
             if best_infeasible_energy is None or float(bie) < float(best_infeasible_energy):
@@ -143,7 +147,7 @@ def _make_feasibility(runs: list[ExperimentRun]) -> FeasibilitySummary:
         feasible_sample_count=feasible_sample_count,
         infeasible_sample_count=infeasible_sample_count,
         mean_feasible_rate=sum(rates) / len(rates) if rates else None,
-        median_feasible_rate=sorted(rates)[len(rates) // 2] if rates else None,
+        median_feasible_rate=median(rates) if rates else None,
         min_feasible_rate=min(rates) if rates else None,
         max_feasible_rate=max(rates) if rates else None,
         zero_feasible_runs=zero_feasible,
@@ -153,6 +157,7 @@ def _make_feasibility(runs: list[ExperimentRun]) -> FeasibilitySummary:
 
 
 def _make_timing(runs: list[ExperimentRun]) -> TimingSummary:
+    runs = [r for r in runs if r.result.status is SolveStatus.SUCCESS]
     wall = make_repeat_summary([r.result.wall_time_seconds for r in runs])
     solver = make_repeat_summary([r.result.solver_time_seconds for r in runs])
     init = make_repeat_summary(
@@ -167,7 +172,13 @@ def _make_timing(runs: list[ExperimentRun]) -> TimingSummary:
     search = make_repeat_summary(
         [r.result.backend.metrics.get("parameter_search_seconds") for r in runs]
     )
-    warmup = make_repeat_summary([r.result.backend.metrics.get("warmup_seconds") for r in runs])
+    warmup = make_repeat_summary(
+        [
+            r.result.backend.metrics.get("warmup_seconds")
+            for r in runs
+            if r.solver_config.parameters.get("warmup") is True
+        ]
+    )
     return TimingSummary(
         count=len(runs),
         total_wall_time_seconds=wall,
@@ -201,7 +212,9 @@ def _make_resource(runs: list[ExperimentRun]) -> ResourceSummary:
     )
 
 
-def _make_group(runs: list[ExperimentRun], key: dict[str, Any]) -> GroupSummary:
+def _make_group(
+    runs: list[ExperimentRun], key: dict[str, Any], reference_runs: list[ExperimentRun]
+) -> GroupSummary:
     env: dict[str, set[str]] = defaultdict(set)
     for r in runs:
         env["variaq"].add(str(r.environment.get("packages", {}).get("variaq")))
@@ -215,7 +228,7 @@ def _make_group(runs: list[ExperimentRun], key: dict[str, Any]) -> GroupSummary:
         count=len(runs),
         run_ids=tuple(r.run_id for r in runs),
         problem_ids=tuple(sorted({r.result.problem_id for r in runs})),
-        quality=_make_quality(runs),
+        quality=_make_quality(runs, reference_runs),
         feasibility=_make_feasibility(runs),
         timing=_make_timing(runs),
         resource=_make_resource(runs),
@@ -356,7 +369,7 @@ def analyze_runs(
     scaling_x_metric: str | None = None,
     comparisons: tuple[str, ...] = (),
 ) -> AnalysisResult:
-    applicable = _applicable_runs(runs, query)
+    applicable = sorted(_applicable_runs(runs, query), key=lambda r: r.run_id)
     source_run_ids = tuple(r.run_id for r in applicable)
     warnings: list[str] = []
 
@@ -368,7 +381,7 @@ def analyze_runs(
             key = _group_key(run, query.group_by)
             grouped[tuple(sorted(key.items()))].append(run)
 
-    groups = [_make_group(runs, dict(key)) for key, runs in grouped.items()]
+    groups = [_make_group(group_runs, dict(key), applicable) for key, group_runs in grouped.items()]
     groups.sort(key=lambda g: str(g.group_key))
 
     scaling_points: list[ScalingPoint] = []
@@ -376,6 +389,11 @@ def analyze_runs(
         scaling_points = _build_scaling_points(groups, scaling_x_metric)
 
     comparison_results: list[ComparisonSummary] = []
+    instances: tuple[dict[str, Any], ...] = ()
+    if "paired_solvers" in comparisons:
+        instances, paired = paired_analysis(applicable)
+        comparison_results.append(paired)
+        warnings.extend(paired.warnings)
     if "classical_vs_quantum" in comparisons:
         comparison_results.append(_classical_vs_quantum(groups))
     if "qiskit_vs_cudaq" in comparisons:
@@ -393,4 +411,5 @@ def analyze_runs(
         comparisons=tuple(comparison_results),
         warnings=tuple(warnings),
         source_run_ids=source_run_ids,
+        instances=instances,
     )
